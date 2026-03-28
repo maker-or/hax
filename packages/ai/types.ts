@@ -265,3 +265,20 @@ export type ResponseToolResultPart = typeof ResponseToolResultPart.Type;
 export type ResponseContentPart = typeof ResponseContentPart.Type;
 export type ProviderMetadata = typeof ProviderMetadata.Type;
 export type UnifiedResponse = typeof UnifiedResponse.Type;
+
+export type UnifiedResponseStreamingResult = {
+  readonly stream: true;
+  readonly textStream: ReadableStream<string>;
+  final(): Promise<UnifiedResponse>;
+};
+
+export type UnifiedResponseStreamController = {
+  pushText(delta: string): void;
+  complete(response: UnifiedResponse): void;
+  error(cause?: unknown): void;
+};
+
+export type CreateUnifiedResponseStreamResult = {
+  result: UnifiedResponseStreamingResult;
+  controller: UnifiedResponseStreamController;
+};

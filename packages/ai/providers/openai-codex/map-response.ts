@@ -1,6 +1,7 @@
 import type { ResponseStreamEvent } from "openai/resources/responses/responses";
 import type { Response } from "openai/resources/responses/responses";
 import type {
+	CreateUnifiedResponseStreamResult,
 	NormalizedToolCall,
 	NormalizedToolResult,
 	ProviderMetadata,
@@ -77,6 +78,7 @@ export function emptyAccumulator(): Accumulator {
 export function mapChunk(
 	state: Accumulator,
 	event: ResponseStreamEvent,
+	stream?: CreateUnifiedResponseStreamResult["controller"],
 ): Accumulator {
 	switch (event.type) {
 		case "response.created": {
@@ -109,8 +111,10 @@ export function mapChunk(
 		}
 		case "response.content_part.added":
 			return state;
-		case "response.output_text.delta":
+		case "response.output_text.delta": {
+			stream?.pushText(event.delta);
 			return { ...state, text: state.text + event.delta };
+		}
 		case "response.output_text.done":
 			return state;
 		case "response.content_part.done":
@@ -119,7 +123,7 @@ export function mapChunk(
 			return state;
 		case "response.completed": {
 			const r = event.response;
-			return {
+			const nextState = {
 				...state,
 				internal: { ...state.internal, rawCompletedResponse: event },
 				...(r.usage !== undefined && r.usage !== null
@@ -133,6 +137,8 @@ export function mapChunk(
 					model: r.model ?? state.providerMetadata.model,
 				},
 			};
+			stream?.complete(toUnifiedSnapshot(nextState));
+			return nextState;
 		}
 		default:
 			return state;
