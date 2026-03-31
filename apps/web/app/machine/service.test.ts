@@ -56,6 +56,63 @@ const request: AppRequestShapeType = {
   ],
 };
 
+function codexSseResponse(args: {
+  responseId: string;
+  messageId: string;
+  model: string;
+  delta: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+}): string {
+  const usage = args.usage ?? {
+    input_tokens: 10,
+    output_tokens: 5,
+    total_tokens: 15,
+  };
+
+  return [
+    `data: ${JSON.stringify({
+      type: "response.created",
+      response: {
+        id: args.responseId,
+        model: args.model,
+        status: "in_progress",
+      },
+    })}`,
+    "",
+    `data: ${JSON.stringify({
+      type: "response.output_item.added",
+      item: {
+        id: args.messageId,
+        type: "message",
+      },
+    })}`,
+    "",
+    `data: ${JSON.stringify({
+      type: "response.output_text.delta",
+      delta: args.delta,
+    })}`,
+    "",
+    `data: ${JSON.stringify({
+      type: "response.output_text.done",
+    })}`,
+    "",
+    `data: ${JSON.stringify({
+      type: "response.completed",
+      response: {
+        id: args.responseId,
+        model: args.model,
+        status: "completed",
+        usage,
+      },
+    })}`,
+    "",
+  ].join("\n");
+}
+
 beforeEach(() => {
   axiosPost.mockClear();
   axiosGet.mockClear();
@@ -96,33 +153,7 @@ describe("handleRequest", () => {
     }
   });
 
-  test("rejects stream false for openai-codex (upstream requires streaming)", async () => {
-    postImpl = async (url) => {
-      expect(url).toBe("https://cautious-platypus-49.convex.site/verify-api-key");
-      return {
-        status: 200,
-        data: { valid: true, userId: "user-1" },
-        headers: {},
-      };
-    };
-
-    const result = await Effect.runPromise(
-      Effect.either(
-        handleRequest(headers, {
-          ...request,
-          stream: false,
-        }),
-      ),
-    );
-
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("BodyParseError");
-      expect(result.left.message).toContain("stream: true");
-    }
-  });
-
-  test("compiles the unified request and proxies it upstream", async () => {
+  test("compiles the unified request and streams unified SSE downstream", async () => {
     const expectedPayload = compileRequest(request);
 
     postImpl = async (url, data, config) => {
@@ -141,12 +172,18 @@ describe("handleRequest", () => {
           "ChatGPT-Account-Id": "acct_123",
           "Content-Type": "application/json",
         });
+        expect(config?.responseType).toBe("stream");
 
         return {
           status: 200,
-          data: JSON.stringify({ id: "resp_123" }),
+          data: codexSseResponse({
+            responseId: "resp_123",
+            messageId: "msg_123",
+            model: "gpt-5.4",
+            delta: "Hello world",
+          }),
           headers: {
-            "content-type": "application/json",
+            "content-type": "text/event-stream",
             "x-request-id": "up_req_123",
           },
         };
@@ -182,9 +219,103 @@ describe("handleRequest", () => {
     const response = await Effect.runPromise(handleRequest(headers, request));
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe(JSON.stringify({ id: "resp_123" }));
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const body = await response.text();
+    expect(body).toContain('event: text\ndata: {"delta":"Hello world"}');
+    expect(body).toContain("event: final");
+    expect(body).toContain('"text":"Hello world"');
+    expect(body).toContain('"responseId":"resp_123"');
+    expect(body).toContain('"messageId":"msg_123"');
     expect(response.headers.get("x-request-id")).toBe("up_req_123");
     expect(response.headers.get("x-machine-request-id")).toBeTruthy();
+  });
+
+  test("collects the streamed provider response into final unified JSON when stream is false", async () => {
+    const nonStreamingRequest = {
+      ...request,
+      stream: false,
+    } satisfies AppRequestShapeType;
+    const expectedPayload = compileRequest(nonStreamingRequest);
+
+    postImpl = async (url, data, config) => {
+      if (url === "https://cautious-platypus-49.convex.site/verify-api-key") {
+        return {
+          status: 200,
+          data: { valid: true, userId: "user-1" },
+          headers: {},
+        };
+      }
+
+      if (url === "https://chatgpt.com/backend-api/codex/responses") {
+        expect(data).toEqual(expectedPayload);
+        expect(config?.responseType).toBe("stream");
+
+        return {
+          status: 200,
+          data: codexSseResponse({
+            responseId: "resp_789",
+            messageId: "msg_789",
+            model: "gpt-5.4",
+            delta: "Collected response",
+          }),
+          headers: {
+            "content-type": "text/event-stream",
+          },
+        };
+      }
+
+      throw new Error(`unexpected post url: ${url}`);
+    };
+
+    getImpl = async () => ({
+      status: 200,
+      data: {
+        _id: "cred_1",
+        _creationTime: 1,
+        userId: "user-1",
+        orgId: "org_1",
+        provider: "openai-codex",
+        accessToken: "access-token",
+        refresh_token: "refresh-token",
+        updatedAt: 1,
+      },
+      headers: {},
+    });
+
+    const response = await Effect.runPromise(
+      handleRequest(headers, nonStreamingRequest),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(await response.json()).toEqual({
+      text: "Collected response",
+      content: [{ type: "text", text: "Collected response" }],
+      toolCalls: [],
+      toolResults: [],
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 15,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0,
+        },
+      },
+      finishReason: "stop",
+      providerMetadata: {
+        provider: "openai-codex",
+        responseId: "resp_789",
+        messageId: "msg_789",
+        model: "gpt-5.4",
+      },
+      warnings: [],
+    });
   });
 
   test("refreshes the access token after an upstream 401", async () => {
@@ -214,9 +345,14 @@ describe("handleRequest", () => {
         if (authHeader === "Bearer refreshed-token") {
           return {
             status: 200,
-            data: JSON.stringify({ id: "resp_456" }),
+            data: codexSseResponse({
+              responseId: "resp_456",
+              messageId: "msg_456",
+              model: "gpt-5.4",
+              delta: "Hello again",
+            }),
             headers: {
-              "content-type": "application/json",
+              "content-type": "text/event-stream",
             },
           };
         }
@@ -251,6 +387,6 @@ describe("handleRequest", () => {
     const response = await Effect.runPromise(handleRequest(headers, request));
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe(JSON.stringify({ id: "resp_456" }));
+    expect(await response.text()).toContain('"delta":"Hello again"');
   });
 });

@@ -1,14 +1,19 @@
 import {
+  type AppRequestShapeType,
+  type UnifiedResponseType,
   appRequestShape,
   compileRequest,
+  emptyAccumulator,
+  mapChunk,
   openaiCodex,
-  type AppRequestShapeType,
+  toUnifiedSnapshot,
 } from "@hax/ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
 import axios from "axios";
 import type { AxiosResponse } from "axios";
 import { Data, Effect, Either, ParseResult, Schedule, Schema } from "effect";
+import type { ResponseStreamEvent } from "openai/resources/responses/responses";
 import {
   type BearerHeaders,
   CredentialLookupRequest,
@@ -78,6 +83,13 @@ type ResolvedBody = {
   upstreamUrl: string;
   upstreamPayload: ReturnType<typeof compileRequest>;
 };
+
+type UpstreamPayload =
+  | ReadableStream<Uint8Array | string>
+  | AsyncIterable<Uint8Array | string>
+  | string
+  | Uint8Array
+  | object;
 
 function hashString(value: string): number {
   let hash = 0;
@@ -195,6 +207,179 @@ function stringifyUnknown(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function encodeSseEvent(event: string, data: unknown): Uint8Array {
+  const payload = typeof data === "string" ? data : JSON.stringify(data);
+  return new TextEncoder().encode(`event: ${event}\ndata: ${payload}\n\n`);
+}
+
+async function* iterateBodyChunks(
+  body: UpstreamPayload,
+): AsyncGenerator<string, void, void> {
+  const decoder = new TextDecoder();
+
+  if (typeof body === "string") {
+    yield body;
+    return;
+  }
+
+  if (body instanceof Uint8Array) {
+    yield decoder.decode(body);
+    return;
+  }
+
+  if (body instanceof ReadableStream) {
+    const reader = body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (typeof value === "string") {
+          yield value;
+        } else if (value instanceof Uint8Array) {
+          yield decoder.decode(value, { stream: true });
+        } else if (value !== undefined) {
+          yield String(value);
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return;
+  }
+
+  if (body && typeof body === "object" && Symbol.asyncIterator in body) {
+    for await (const chunk of body as AsyncIterable<Uint8Array | string>) {
+      if (typeof chunk === "string") {
+        yield chunk;
+      } else {
+        yield decoder.decode(chunk, { stream: true });
+      }
+    }
+    return;
+  }
+
+  yield stringifyUnknown(body);
+}
+
+async function* parseCodexEvents(
+  body: UpstreamPayload,
+): AsyncGenerator<ResponseStreamEvent, void, void> {
+  let buffer = "";
+
+  const parseFrame = (rawFrame: string): ResponseStreamEvent | undefined => {
+    const frame = rawFrame.replace(/\r\n/g, "\n");
+    const dataLines = frame
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .filter((line) => line.length > 0);
+
+    if (dataLines.length === 0) {
+      return undefined;
+    }
+
+    const data = dataLines.join("\n");
+    if (data === "[DONE]") {
+      return undefined;
+    }
+
+    return JSON.parse(data) as ResponseStreamEvent;
+  };
+
+  for await (const chunk of iterateBodyChunks(body)) {
+    buffer += chunk;
+
+    while (true) {
+      const separatorIndex = buffer.indexOf("\n\n");
+      if (separatorIndex === -1) break;
+
+      const frame = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      const parsed = parseFrame(frame);
+      if (parsed !== undefined) {
+        yield parsed;
+      }
+    }
+  }
+
+  const trailingFrame = buffer.trim();
+  if (trailingFrame.length > 0) {
+    const parsed = parseFrame(trailingFrame);
+    if (parsed !== undefined) {
+      yield parsed;
+    }
+  }
+}
+
+/**
+ * This is used when the stream is false
+ */
+async function collectUnifiedResponse(body: UpstreamPayload): Promise<UnifiedResponseType> {
+  let acc = emptyAccumulator();
+
+  for await (const event of parseCodexEvents(body)) {
+    acc = mapChunk(acc, event);
+  }
+
+  if (!acc.completed) {
+    throw new UpstreamError({
+      message: "Upstream stream ended before response.completed",
+    });
+  }
+
+  return toUnifiedSnapshot(acc);
+}
+
+/**
+ * This particular function is used when the stream is true
+ */
+function createUnifiedStreamingResponse(
+  body: UpstreamPayload,
+  headers: Headers,
+): Response {
+  const responseStream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let acc = emptyAccumulator();
+
+      try {
+          for await (const event of parseCodexEvents(body)) {
+          acc = mapChunk(acc, event);
+          if (event.type === "response.output_text.delta") {
+            controller.enqueue(encodeSseEvent("text", { delta: event.delta }));
+          }
+        }
+
+        if (!acc.completed) {
+          throw new UpstreamError({
+            message: "Upstream stream ended before response.completed",
+          });
+        }
+
+        const finalResponse = toUnifiedSnapshot(acc);
+        controller.enqueue(encodeSseEvent("final", finalResponse));
+        controller.close();
+      } catch (error) {
+        controller.enqueue(
+          encodeSseEvent("error", {
+            message: stringifyUnknown(error),
+          }),
+        );
+        controller.close();
+      }
+    },
+  });
+
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("content-type", "text/event-stream; charset=utf-8");
+  responseHeaders.set("x-accel-buffering", "no");
+  responseHeaders.set("cache-control", "no-cache");
+
+  return new Response(responseStream, {
+    status: 200,
+    headers: responseHeaders,
+  });
 }
 
 function validateToken(
@@ -416,7 +601,6 @@ function sendUpstream(
     span.setAttribute("machine.provider_host", context.providerHost);
     span.setAttribute("machine.stream", request.stream);
 
-    type UpstreamPayload = ReadableStream | string | Uint8Array | object;
     const res: AxiosResponse<UpstreamPayload> = yield* (() => {
       switch (providerName) {
         case "openai-codex":
@@ -485,6 +669,7 @@ function sendUpstream(
                           }
                         : {}),
                     },
+                    responseType: "stream",
                     validateStatus: () => true,
                   }),
                 catch: (cause) => new NetworkError({ cause }),
@@ -585,7 +770,21 @@ function sendUpstream(
     }
     passthroughHeaders.set("x-machine-request-id", context.requestId);
 
-    return new Response(res.data as ReadableStream, {
+    if (request.stream) {
+      return createUnifiedStreamingResponse(res.data, passthroughHeaders);
+    }
+
+    const finalResponse = yield* Effect.tryPromise({
+      try: () => collectUnifiedResponse(res.data),
+      catch: (cause) =>
+        new UpstreamError({
+          message: `Failed to map upstream response: ${stringifyUnknown(cause)}`,
+        }),
+    });
+
+    passthroughHeaders.set("content-type", "application/json; charset=utf-8");
+
+    return Response.json(finalResponse, {
       status: res.status,
       headers: passthroughHeaders,
     });

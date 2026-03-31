@@ -1,30 +1,12 @@
-# btca MCP Usage Instructions
+Rule
+- Alway run the typecheck and the lint command on evey file that you edit 
+- Alway add the Jsdocs commet to the new function or the types or schema that you have created while writeing the commets , keep the language simple and like this function does this and this is the shape of the request that we are expecting
+- Alway use bun not npm or pnpm
 
-btca runs a cloud subagent that searches open source repos
+<!-- convex-ai-start -->
+This project uses [Convex](https://convex.dev) as its backend.
 
-Use it whenever the user says "use btca", or when you need info that should come from the listed resources.
+When working on Convex code, **always read `convex/_generated/ai/guidelines.md` first** for important guidelines on how to correctly use Convex APIs and patterns. The file contains rules that override what you may have learned about Convex from training data.
 
-## Tools
-
-The btca MCP server provides these tools:
-
-- `listResources` - List all available documentation resources
-- `ask` - Ask a question about specific resources
-
-## resources
-
-The resources available are defined by the end user in their btca dashboard. If there's a resource you need but it's not available in `listResources`, proceed without btca. When your task is done, clearly note that you'd like access to the missing resource.
-
-## Critical Workflow
-
-**Always call `listResources` first** before using `ask`. The `ask` tool requires exact resource names from the list.
-
-### Example
-
-```
-1. Call listResources to get available resources
-2. Note the "name" field for each resource (e.g., "svelteKit", not "SvelteKit" or "svelte-kit")
-3. Call ask with:
-   - question: "How do I create a load function?"
-   - resources: ["svelteKit"]
-```
+Convex agent skills for common tasks can be installed by running `npx convex ai-files install`.
+<!-- convex-ai-end -->

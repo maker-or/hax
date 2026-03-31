@@ -1,5 +1,6 @@
 "use client";
 
+import { useAction } from "convex/react";
 import {
 	AlertTriangle,
 	Check,
@@ -11,27 +12,9 @@ import {
 	Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { api } from "../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { cx, press } from "../../_classes";
-
-const SECRET_CHARS =
-	"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-
-/** Random alphanumeric (client-secret–shaped suffix). */
-function randomAlphanumeric(length: number): string {
-	const bytes = new Uint8Array(length);
-	crypto.getRandomValues(bytes);
-	let out = "";
-	for (let i = 0; i < length; i++) {
-		out += SECRET_CHARS[bytes[i] % SECRET_CHARS.length];
-	}
-	return out;
-}
-
-/** Looks like a typical API client secret: `sk_live_` + long opaque suffix (UI mock only). */
-function generateClientSecretLike(): string {
-	return `sk_live_${randomAlphanumeric(56)}`;
-}
 
 export interface SecretMeta {
 	id: string;
@@ -40,37 +23,129 @@ export interface SecretMeta {
 	createdAt: string;
 }
 
+/**
+ * This is the full secret payload we get back from WorkOS right after creation.
+ * The secret value is returned once, so the UI keeps it only in local state.
+ */
 interface NewSecretInfo {
 	secretId: string;
 	secret: string;
 	lastFour: string;
+	name: string;
+	createdAt: string;
+}
+
+/** This function writes verbose browser logs for the client secret UI flow. */
+function logClientSecretUi(
+	step: string,
+	payload: Record<string, unknown>,
+): void {
+	console.log(`[console-ui][client-secrets] ${step}`, payload);
 }
 
 export function ClientSecretsSection({
-	appId: _appId,
+	appId,
 	isAdmin,
 }: {
 	appId: Id<"consoleApp">;
 	isAdmin: boolean;
 }) {
-	const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+	const listClientSecrets = useAction(api.console.listClientSecrets);
+	const createClientSecret = useAction(api.console.createClientSecret);
+	const revokeClientSecret = useAction(api.console.revokeClientSecret);
+	const [secrets, setSecrets] = useState<SecretMeta[] | null>(null);
 	const [newSecret, setNewSecret] = useState<NewSecretInfo | null>(null);
 	const [showNewSecret, setShowNewSecret] = useState(false);
 	const [newSecretName, setNewSecretName] = useState("");
 	const [showCreateForm, setShowCreateForm] = useState(false);
 	const [copied, setCopied] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [isLoadingSecrets, setIsLoadingSecrets] = useState(true);
+	const [isCreating, setIsCreating] = useState(false);
+	const [revokingSecretId, setRevokingSecretId] = useState<string | null>(null);
 	const isMountedRef = useRef(true);
 	const copyResetTimeoutRef = useRef<number | null>(null);
 
 	useEffect(() => {
+		isMountedRef.current = true;
+		logClientSecretUi("component_context", {
+			appId,
+			isAdmin,
+		});
+	}, [appId, isAdmin]);
+
+	useEffect(() => {
+		logClientSecretUi("component_mounted", {
+			component: "ClientSecretsSection",
+		});
 		return () => {
+			logClientSecretUi("component_unmounted", {
+				component: "ClientSecretsSection",
+			});
 			isMountedRef.current = false;
 			if (copyResetTimeoutRef.current !== null) {
 				window.clearTimeout(copyResetTimeoutRef.current);
 			}
 		};
 	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+
+		/**
+		 * This function loads the current client secret metadata from WorkOS.
+		 */
+		const loadSecrets = async () => {
+			logClientSecretUi("list_start", {
+				appId,
+			});
+			setIsLoadingSecrets(true);
+			try {
+				const nextSecrets = await listClientSecrets({ appId });
+				logClientSecretUi("list_success", {
+					appId,
+					count: nextSecrets.length,
+					secretIds: nextSecrets.map((secret) => secret.id),
+				});
+				if (cancelled || !isMountedRef.current) return;
+				setSecrets(nextSecrets);
+			} catch (loadError) {
+				logClientSecretUi("list_error", {
+					appId,
+					error:
+						loadError instanceof Error
+							? {
+									name: loadError.name,
+									message: loadError.message,
+									stack: loadError.stack,
+								}
+							: loadError,
+				});
+				if (cancelled || !isMountedRef.current) return;
+				setError(
+					loadError instanceof Error
+						? loadError.message
+						: "Failed to load client secrets.",
+				);
+				setSecrets([]);
+			} finally {
+				logClientSecretUi("list_finally", {
+					appId,
+					cancelled,
+					isMounted: isMountedRef.current,
+				});
+				if (!cancelled && isMountedRef.current) {
+					setIsLoadingSecrets(false);
+				}
+			}
+		};
+
+		void loadSecrets();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [appId, listClientSecrets]);
 
 	const copyToClipboard = (text: string, key: string) => {
 		navigator.clipboard.writeText(text);
@@ -83,34 +158,149 @@ export function ClientSecretsSection({
 		}, 2000);
 	};
 
-	const handleCreateSecret = () => {
+	/**
+	 * This function creates a client secret in WorkOS and shows the one-time secret value.
+	 */
+	const handleCreateSecret = async () => {
 		const trimmed = newSecretName.trim();
+		logClientSecretUi("create_click", {
+			appId,
+			requestedName: trimmed,
+			isCreatingBefore: isCreating,
+		});
 		if (!trimmed) {
+			logClientSecretUi("create_blocked_empty_name", {
+				appId,
+			});
 			setError("Secret name is required.");
 			return;
 		}
 		setError(null);
-		const secret = generateClientSecretLike();
-		const id = `sec_${randomAlphanumeric(24)}`;
-		const lastFour = secret.slice(-4);
-		const createdAt = new Date().toISOString();
-		setNewSecret({ secretId: id, secret, lastFour });
-		setShowNewSecret(true);
-		setNewSecretName("");
-		setShowCreateForm(false);
-		setSecrets((prev) => {
-			const row: SecretMeta = {
-				id,
-				name: trimmed,
-				lastFour,
-				createdAt,
-			};
-			return [...prev.filter((s) => s.id !== id), row];
+		setIsCreating(true);
+		logClientSecretUi("create_request_start", {
+			appId,
+			requestedName: trimmed,
 		});
+		try {
+			const created = await createClientSecret({
+				appId,
+				name: trimmed,
+			});
+			logClientSecretUi("create_request_success", {
+				appId,
+				secretId: created.secretId,
+				name: created.name,
+				lastFour: created.lastFour,
+				createdAt: created.createdAt,
+				secretLength: created.secret.length,
+			});
+			if (!isMountedRef.current) return;
+			setSecrets((prev) => {
+				const current = prev ?? [];
+				const nextRow: SecretMeta = {
+					id: created.secretId,
+					name: created.name,
+					lastFour: created.lastFour,
+					createdAt: created.createdAt,
+				};
+				return [
+					nextRow,
+					...current.filter((secret) => secret.id !== nextRow.id),
+				];
+			});
+			setNewSecret({
+				secretId: created.secretId,
+				secret: created.secret,
+				lastFour: created.lastFour,
+				name: created.name,
+				createdAt: created.createdAt,
+			});
+			setShowNewSecret(true);
+			setNewSecretName("");
+			setShowCreateForm(false);
+			logClientSecretUi("create_state_updated", {
+				appId,
+				secretId: created.secretId,
+				showNewSecret: true,
+			});
+		} catch (createError) {
+			logClientSecretUi("create_request_error", {
+				appId,
+				error:
+					createError instanceof Error
+						? {
+								name: createError.name,
+								message: createError.message,
+								stack: createError.stack,
+							}
+						: createError,
+			});
+			if (!isMountedRef.current) return;
+			setError(
+				createError instanceof Error
+					? createError.message
+					: "Failed to create client secret.",
+			);
+		} finally {
+			logClientSecretUi("create_request_finally", {
+				appId,
+				isMounted: isMountedRef.current,
+			});
+			if (isMountedRef.current) setIsCreating(false);
+		}
 	};
 
-	const handleRevoke = (secretId: string) => {
-		setSecrets((prev) => prev.filter((s) => s.id !== secretId));
+	/**
+	 * This function revokes a client secret in WorkOS by using the WorkOS secret id.
+	 */
+	const handleRevoke = async (secretId: string) => {
+		logClientSecretUi("revoke_click", {
+			appId,
+			secretId,
+		});
+		setError(null);
+		setRevokingSecretId(secretId);
+		try {
+			await revokeClientSecret({ appId, secretId });
+			logClientSecretUi("revoke_success", {
+				appId,
+				secretId,
+			});
+			if (isMountedRef.current) {
+				setSecrets((prev) =>
+					(prev ?? []).filter((secret) => secret.id !== secretId),
+				);
+			}
+			if (isMountedRef.current && newSecret?.secretId === secretId) {
+				setNewSecret(null);
+			}
+		} catch (revokeError) {
+			logClientSecretUi("revoke_error", {
+				appId,
+				secretId,
+				error:
+					revokeError instanceof Error
+						? {
+								name: revokeError.name,
+								message: revokeError.message,
+								stack: revokeError.stack,
+							}
+						: revokeError,
+			});
+			if (!isMountedRef.current) return;
+			setError(
+				revokeError instanceof Error
+					? revokeError.message
+					: "Failed to revoke client secret.",
+			);
+		} finally {
+			logClientSecretUi("revoke_finally", {
+				appId,
+				secretId,
+				isMounted: isMountedRef.current,
+			});
+			if (isMountedRef.current) setRevokingSecretId(null);
+		}
 	};
 
 	return (
@@ -225,15 +415,16 @@ export function ClientSecretsSection({
 						<button
 							type="button"
 							onClick={handleCreateSecret}
-							disabled={!newSecretName.trim()}
+							disabled={!newSecretName.trim() || isCreating}
 							className={`${cx.primaryBtn} disabled:active:scale-100`}
 						>
 							<Plus className="size-4" />
-							Create
+							{isCreating ? "Creating..." : "Create"}
 						</button>
 						<button
 							type="button"
 							onClick={() => setShowCreateForm(false)}
+							disabled={isCreating}
 							className={`${cx.ghostBtn} px-3 py-2`}
 						>
 							Cancel
@@ -249,7 +440,16 @@ export function ClientSecretsSection({
 				</div>
 			)}
 
-			{secrets.length === 0 ? (
+			{isLoadingSecrets ? (
+				<div className="flex flex-col gap-2">
+					{[0, 1].map((item) => (
+						<div
+							key={item}
+							className="h-16 animate-pulse rounded-none border border-border/60 bg-muted/30"
+						/>
+					))}
+				</div>
+			) : (secrets ?? []).length === 0 ? (
 				<div className="flex flex-col items-center justify-center rounded-none border border-dashed border-border/70 bg-muted/20 py-12 text-center">
 					<p className="text-sm text-muted-foreground">
 						No client secrets yet.
@@ -262,7 +462,7 @@ export function ClientSecretsSection({
 				</div>
 			) : (
 				<div className="flex flex-col gap-2">
-					{secrets.map((secret) => (
+					{(secrets ?? []).map((secret) => (
 						<div
 							key={secret.id}
 							className="flex items-center justify-between rounded-none border border-border/60 bg-card/40 px-4 py-3.5 shadow-sm transition-colors duration-150 ease-out hover:bg-muted/15"
@@ -284,10 +484,11 @@ export function ClientSecretsSection({
 								<button
 									type="button"
 									onClick={() => handleRevoke(secret.id)}
+									disabled={revokingSecretId === secret.id}
 									className={cx.revokeBtn}
 								>
 									<Trash2 className="size-3.5" />
-									Revoke
+									{revokingSecretId === secret.id ? "Revoking..." : "Revoke"}
 								</button>
 							)}
 						</div>

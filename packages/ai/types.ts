@@ -1,5 +1,5 @@
-import { Schema , Stream } from "effect";
-import { stream } from "effect/FastCheck";
+import { Schema } from "effect";
+import type { appRequestShape } from "./providers/openai-codex/types.ts";
 
 
 export const Provider = Schema.Literal(
@@ -224,21 +224,6 @@ export const UnifiedResponse = Schema.Struct({
 });
 
 
-export type UnifiedStreamingResult = {
-  readonly stream: true;
-  readonly textStream?: ReadableStream<string>;
-  readonly objectStream?: ReadableStream<unknown>;
-  final(): Promise<UnifiedResponse>;
-};
-export type UnifiedBatchResult = {
-  readonly stream: false;
-  readonly response: UnifiedResponse;
-};
-export type UnifiedGenerateResult =
-  | UnifiedBatchResult
-  | UnifiedStreamingResult;
-
-
 export type Provider = typeof Provider.Type;
 export type Transport = typeof Transport.Type;
 export type cost = typeof cost.Type;
@@ -272,6 +257,15 @@ export type UnifiedResponseStreamingResult = {
   final(): Promise<UnifiedResponse>;
 };
 
+export type UnifiedResponseBatchResult = {
+  readonly stream: false;
+  readonly response: UnifiedResponse;
+};
+
+export type UnifiedGenerateResult =
+  | UnifiedResponseBatchResult
+  | UnifiedResponseStreamingResult;
+
 export type UnifiedResponseStreamController = {
   pushText(delta: string): void;
   complete(response: UnifiedResponse): void;
@@ -281,4 +275,19 @@ export type UnifiedResponseStreamController = {
 export type CreateUnifiedResponseStreamResult = {
   result: UnifiedResponseStreamingResult;
   controller: UnifiedResponseStreamController;
+};
+
+/*
+ * There both accessToken , refreshToken are the user-specific credentials. and clientId , clientSecret are the application-specific credentials.
+ */
+export type CreateClientOptions = {
+  accessToken: string;
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  baseUrl?: string;
+};
+
+export type Client = {
+  generate(request: appRequestShape): Promise<UnifiedGenerateResult>;
 };
