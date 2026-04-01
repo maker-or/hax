@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import type { appRequestShape } from "../providers/openai-codex/types.ts";
 import type {
 	Client,
@@ -6,7 +7,6 @@ import type {
 } from "../types.ts";
 import { generate } from "./generate.ts";
 import { refreshAccessToken as refreshTokens } from "./refresh-access-token.ts";
-import { Effect } from "effect";
 
 const DEFAULT_BASE_URL = "https://your-default-polaris-url";
 const MACHINE_ENDPOINT_PATH = "/api/v1/chat/completions";

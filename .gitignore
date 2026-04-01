@@ -1,5 +1,4 @@
-# Local-only Vite consumer (not tracked)
-apps/playground/
+
 
 # Env (never commit secrets)
 .env
