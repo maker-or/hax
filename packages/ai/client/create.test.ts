@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { AppRequestShapeType, UnifiedResponseType } from "../index.ts";
-import { create } from "./create.ts";
+import type { AppRequestShapeType, UnifiedResponseType } from "../index.js";
+import { create } from "./create.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -21,10 +21,11 @@ const request: AppRequestShapeType = {
 };
 
 const finalResponse: UnifiedResponseType = {
+	status: "completed",
 	text: "Hello",
 	content: [{ type: "text", text: "Hello" }],
 	toolCalls: [],
-	toolResults: [],
+	approvals: [],
 	finishReason: "stop",
 	providerMetadata: {
 		provider: "openai-codex",

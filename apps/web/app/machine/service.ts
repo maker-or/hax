@@ -282,6 +282,19 @@ async function* iterateBodyChunks(
 	yield stringifyUnknown(body);
 }
 
+/**
+ * This reads an upstream error payload into text so machine errors include the real provider message.
+ */
+async function readUpstreamErrorBody(body: UpstreamPayload): Promise<string> {
+	let result = "";
+
+	for await (const chunk of iterateBodyChunks(body)) {
+		result += chunk;
+	}
+
+	return result.trim();
+}
+
 async function* parseCodexEvents(
 	body: UpstreamPayload,
 ): AsyncGenerator<ResponseStreamEvent, void, void> {
@@ -460,7 +473,9 @@ function validateToken(
 		context.tokenValidationStatus = 200;
 		context.tokenValid = true;
 		context.userId = claims.sub;
-		context.organizationId = claims.org_id;
+		if (claims.org_id !== undefined) {
+			context.organizationId = claims.org_id;
+		}
 
 		span.setAttribute("machine.validation_status", 200);
 	});
@@ -791,8 +806,13 @@ function sendUpstream(
 		}
 
 		if (res.status < 200 || res.status >= 300) {
+			const upstreamErrorBody = yield* Effect.tryPromise({
+				try: () => readUpstreamErrorBody(res.data),
+				catch: (cause) => new NetworkError({ cause }),
+			}).pipe(Effect.orElseSucceed(() => stringifyUnknown(res.data)));
+
 			yield* new UpstreamError({
-				message: `Upstream request failed with status ${res.status}: ${stringifyUnknown(res.data)}`,
+				message: `Upstream request failed with status ${res.status}: ${upstreamErrorBody || stringifyUnknown(res.data)}`,
 				status: res.status,
 			});
 		}

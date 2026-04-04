@@ -1,126 +1,129 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  AppRequestShapeType,
-  UnifiedResponseType,
-} from "../index.ts";
-import { generate } from "./generate.ts";
+import type { AppRequestShapeType, UnifiedResponseType } from "../index.js";
+import { generate } from "./generate.js";
 
 const streamingRequest: AppRequestShapeType = {
-  provider: "openai-codex",
-  model: "gpt-5.4",
-  system: "Be concise.",
-  stream: true,
-  temperature: 0.2,
-  maxRetries: 2,
-  messages: [
-    {
-      role: "user",
-      content: "Say hello.",
-      timestamp: 1,
-    },
-  ],
+	provider: "openai-codex",
+	model: "gpt-5.4",
+	system: "Be concise.",
+	stream: true,
+	temperature: 0.2,
+	maxRetries: 2,
+	messages: [
+		{
+			role: "user",
+			content: "Say hello.",
+			timestamp: 1,
+		},
+	],
 };
 
-async function readTextStream(stream: ReadableStream<string>): Promise<string[]> {
-  const reader = stream.getReader();
-  const chunks: string[] = [];
+async function readTextStream(
+	stream: ReadableStream<string>,
+): Promise<string[]> {
+	const reader = stream.getReader();
+	const chunks: string[] = [];
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
 
-  return chunks;
+	return chunks;
 }
 
 describe("generate", () => {
-  test("returns a streaming result for stream=true responses", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input, init) => {
-      expect(input).toBe("https://example.com/v1/chat/completions");
-      expect(init?.method).toBe("POST");
-      expect(init?.headers).toBeInstanceOf(Headers);
-      expect(
-        JSON.parse(String(init?.body)) satisfies Record<string, unknown>,
-      ).not.toHaveProperty("signal");
+	test("returns a streaming result for stream=true responses", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (input, init) => {
+			expect(input).toBe("https://example.com/v1/chat/completions");
+			expect(init?.method).toBe("POST");
+			expect(init?.headers).toBeInstanceOf(Headers);
+			expect(
+				JSON.parse(String(init?.body)) satisfies Record<string, unknown>,
+			).not.toHaveProperty("signal");
 
-      return new Response(
-        [
-          'event: text',
-          'data: {"delta":"Hello"}',
-          "",
-          "event: final",
-          'data: {"text":"Hello","content":[{"type":"text","text":"Hello"}],"toolCalls":[],"toolResults":[],"finishReason":"stop","providerMetadata":{"provider":"openai-codex"},"warnings":[]}',
-          "",
-        ].join("\n"),
-        {
-          status: 200,
-          headers: {
-            "content-type": "text/event-stream",
-          },
-        },
-      );
-    }) as typeof globalThis.fetch;
+			return new Response(
+				[
+					"event: text",
+					'data: {"delta":"Hello"}',
+					"",
+					"event: final",
+					'data: {"status":"completed","text":"Hello","content":[{"type":"text","text":"Hello"}],"toolCalls":[],"approvals":[],"finishReason":"stop","providerMetadata":{"provider":"openai-codex"},"warnings":[]}',
+					"",
+				].join("\n"),
+				{
+					status: 200,
+					headers: {
+						"content-type": "text/event-stream",
+					},
+				},
+			);
+		}) as typeof globalThis.fetch;
 
-    try {
-      const result = await generate(streamingRequest, {
-        endpoint: "https://example.com/v1/chat/completions",
-      });
+		try {
+			const result = await generate(streamingRequest, {
+				endpoint: "https://example.com/v1/chat/completions",
+			});
 
-      expect(result.stream).toBe(true);
-      const chunks = await readTextStream(result.textStream);
-      const final = await result.final();
+			expect(result.stream).toBe(true);
+			if (!result.stream) {
+				throw new Error("expected streaming result");
+			}
+			const chunks = await readTextStream(result.textStream);
+			const final = await result.final();
 
-      expect(chunks).toEqual(["Hello"]);
-      expect(final.text).toBe("Hello");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
+			expect(chunks).toEqual(["Hello"]);
+			expect(final.text).toBe("Hello");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
 
-  test("returns a batch result for stream=false responses", async () => {
-    const batchRequest: AppRequestShapeType = {
-      ...streamingRequest,
-      stream: false,
-    };
+	test("returns a batch result for stream=false responses", async () => {
+		const batchRequest: AppRequestShapeType = {
+			...streamingRequest,
+			stream: false,
+		};
 
-    const finalResponse: UnifiedResponseType = {
-      text: "Collected response",
-      content: [{ type: "text", text: "Collected response" }],
-      toolCalls: [],
-      toolResults: [],
-      finishReason: "stop",
-      providerMetadata: {
-        provider: "openai-codex",
-        responseId: "resp_789",
-      },
-      warnings: [],
-    };
+		const finalResponse: UnifiedResponseType = {
+			status: "completed",
+			text: "Collected response",
+			content: [{ type: "text", text: "Collected response" }],
+			toolCalls: [],
+			approvals: [],
+			finishReason: "stop",
+			providerMetadata: {
+				provider: "openai-codex",
+				responseId: "resp_789",
+			},
+			warnings: [],
+		};
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input, init) => {
-      expect(input).toBe("https://example.com/v1/chat/completions");
-      expect(init?.method).toBe("POST");
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (input, init) => {
+			expect(input).toBe("https://example.com/v1/chat/completions");
+			expect(init?.method).toBe("POST");
 
-      return Response.json(finalResponse);
-    }) as typeof globalThis.fetch;
+			return Response.json(finalResponse);
+		}) as typeof globalThis.fetch;
 
-    try {
-      const result = await generate(batchRequest, {
-        endpoint: "https://example.com/v1/chat/completions",
-      });
+		try {
+			const result = await generate(batchRequest, {
+				endpoint: "https://example.com/v1/chat/completions",
+			});
 
-      expect(result.stream).toBe(false);
-      if (!result.stream) {
-        expect(result.response).toEqual(finalResponse);
-      }
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
+			expect(result.stream).toBe(false);
+			if (!result.stream) {
+				expect(result.response).toEqual(finalResponse);
+			}
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
 });

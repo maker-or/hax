@@ -9,7 +9,8 @@
     "jsx": "preserve",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@hax/ai": ["../../packages/ai/index.ts"]
     },
     "plugins": [
       {

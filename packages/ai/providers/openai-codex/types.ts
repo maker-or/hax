@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { BaseModel, message } from "../../types";
+import { BaseModel, ToolDefinition, message } from "../../types.js";
 
 export const CodexResponseStatus = Schema.Literal(
 	"completed",
@@ -67,11 +67,44 @@ const assistantMessageType = Schema.Struct({
 	content: Schema.Union(Schema.String, Schema.Array(assistantContentPart)),
 });
 
+/**
+ * This is the native function call item that we send back in follow-up input.
+ */
+export const functionCallInputType = Schema.Struct({
+	type: Schema.Literal("function_call"),
+	id: Schema.String,
+	call_id: Schema.String,
+	name: Schema.String,
+	arguments: Schema.String,
+});
+
+/**
+ * This is the tool output item that we send back after executing a function tool.
+ */
+export const functionToolOutputType = Schema.Struct({
+	type: Schema.Literal("function_call_output"),
+	call_id: Schema.String,
+	output: Schema.String,
+});
+
 export const inputMessageType = Schema.Union(
 	devloperMessagetype,
 	userMessageType,
 	assistantMessageType,
+	functionCallInputType,
+	functionToolOutputType,
 );
+
+/**
+ * This is the function tool definition we send to the Codex Responses API.
+ */
+export const codexFunctionTool = Schema.Struct({
+	type: Schema.Literal("function"),
+	name: Schema.String,
+	description: Schema.String,
+	parameters: Schema.Unknown,
+	strict: Schema.Boolean,
+});
 
 /**
  *  this are the model name that we need to use when sending requests to the codex APIs
@@ -88,12 +121,18 @@ export const CodexModelId = Schema.Literal(
 );
 
 /**
+ * This is the union of `model` string ids for `provider: "openai-codex"` requests (same set as `CodexModelId` schema).
+ */
+export type CodexModelIdType = typeof CodexModelId.Type;
+
+/**
  *  this is the shape of the body that we send to the codex APIs
  */
 export const codexRequestShape = Schema.Struct({
 	model: CodexModelId,
 	instructions: Schema.String,
 	input: Schema.Array(inputMessageType),
+	tools: Schema.optional(Schema.Array(codexFunctionTool)),
 	stream: Schema.Boolean,
 	store: Schema.Boolean,
 });
@@ -114,6 +153,7 @@ export const appRequestShape = Schema.Struct({
 	system: Schema.String,
 	stream: Schema.Boolean,
 	messages: Schema.Array(message),
+	tools: Schema.optional(Schema.Array(ToolDefinition)),
 	temperature: Schema.Number,
 	maxRetries: Schema.Number,
 	signal: Schema.optional(Schema.instanceOf(AbortSignal)),
@@ -142,6 +182,9 @@ export type appRequestShape = typeof appRequestShape.Type;
 export type codexInputContent = typeof codexInputContent.Type;
 export type assistantContentPart = typeof assistantContentPart.Type;
 export type inputMessageType = typeof inputMessageType.Type;
+export type functionCallInputType = typeof functionCallInputType.Type;
+export type functionToolOutputType = typeof functionToolOutputType.Type;
+export type codexFunctionTool = typeof codexFunctionTool.Type;
 export type codexRequestShape = typeof codexRequestShape.Type;
 export type textInput = typeof textInput.Type;
 export type imageInput = typeof imageInput.Type;

@@ -1,0 +1,7 @@
+*.test.ts
+*.e2e.test.ts
+**/*.test.ts
+**/*.e2e.test.ts
+dist/**/*.map
+dist/.tsbuildinfo
+.biomeignore

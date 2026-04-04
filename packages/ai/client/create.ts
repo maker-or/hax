@@ -1,12 +1,16 @@
 import { Effect } from "effect";
-import type { appRequestShape } from "../providers/openai-codex/types.ts";
-import type {
-	Client,
-	CreateClientOptions,
-	UnifiedGenerateResult,
-} from "../types.ts";
-import { generate } from "./generate.ts";
-import { refreshAccessToken as refreshTokens } from "./refresh-access-token.ts";
+import type { appRequestShape } from "../providers/openai-codex/types.js";
+import type { CreateClientOptions, UnifiedGenerateResult } from "../types.js";
+import { generate } from "./generate.js";
+import { refreshAccessToken as refreshTokens } from "./refresh-access-token.js";
+
+/**
+ * This is the AI client you get from `create()`.
+ * `generate` expects the OpenAI Codex app request shape (including `model`), not the generic `requestShape` helper.
+ */
+export type Client = {
+	generate(request: appRequestShape): Promise<UnifiedGenerateResult>;
+};
 
 const DEFAULT_BASE_URL = "https://your-default-polaris-url";
 const MACHINE_ENDPOINT_PATH = "/api/v1/chat/completions";

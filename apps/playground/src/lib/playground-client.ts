@@ -1,11 +1,45 @@
 import {
 	type AppRequestShapeType,
 	type AttachmentContentType,
+	type MessageType,
 	type UnifiedResponseType,
 	create,
 } from "@hax/ai";
 
 export type FinalResponse = UnifiedResponseType;
+
+export const DEFAULT_PROMPT = "Write a haiku about validating AI DX.";
+export const DEFAULT_SYSTEM_PROMPT =
+	"You are a concise assistant helping validate the Hax AI client DX.";
+export const DEFAULT_HISTORY_JSON = "[]";
+
+/**
+ * This is one row in the playground activity timeline (run, model step, tools, etc.).
+ */
+export type AgentTimelineItem = {
+	id: string;
+	kind: "run" | "model" | "tool-call" | "approval" | "tool-result" | "final";
+	title: string;
+	detail?: string;
+	input?: unknown;
+	output?: unknown;
+};
+
+/**
+ * This is what the UI shows when the machine asks to approve a tool call.
+ */
+export type PlaygroundApprovalRequest = {
+	toolName: string;
+	input: unknown;
+};
+
+/**
+ * This is the caller’s answer to an approval prompt in the playground.
+ */
+export type PlaygroundApprovalDecision = {
+	approved: boolean;
+	reason?: string;
+};
 
 /**
  * Holds machine API settings loaded from Vite env. Used only for local playground runs.
@@ -22,9 +56,16 @@ export type PlaygroundConfig = {
 
 export type RunPlaygroundRequestOptions = {
 	prompt: string;
+	systemPrompt: string;
 	stream: boolean;
 	files: File[];
+	historyJson: string;
+	appendPromptAsUserMessage: boolean;
 	onTextDelta?: (delta: string) => void;
+	onTimelineEvent?: (event: AgentTimelineItem) => void;
+	requestApproval?: (
+		request: PlaygroundApprovalRequest,
+	) => Promise<PlaygroundApprovalDecision>;
 };
 
 export type RunPlaygroundRequestResult = {
@@ -32,8 +73,14 @@ export type RunPlaygroundRequestResult = {
 	output: string;
 };
 
-export const DEFAULT_PROMPT = "Write a haiku about validating AI DX.";
 const DEFAULT_LOCAL_MACHINE_BASE_URL = "http://localhost:3000";
+
+function nextTimelineId(): string {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return crypto.randomUUID();
+	}
+	return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 /**
  * Resolves the machine API base URL for the playground.
@@ -93,6 +140,41 @@ export function getPlaygroundConfig(): PlaygroundConfig {
 
 export function stringifyJson(value: unknown): string {
 	return JSON.stringify(value, null, 2);
+}
+
+/**
+ * This builds a readable JSON preview of the request the playground will send (no file base64).
+ */
+export function getPlaygroundRequestPreview(options: {
+	systemPrompt: string;
+	prompt: string;
+	files: File[];
+	historyJson: string;
+	appendPromptAsUserMessage: boolean;
+}): string {
+	let history: unknown;
+	try {
+		history = JSON.parse(options.historyJson) as unknown;
+	} catch {
+		history = "(invalid JSON)";
+	}
+
+	return stringifyJson({
+		provider: "openai-codex",
+		model: "gpt-5.4",
+		system: options.systemPrompt,
+		stream: "(chosen when you run)",
+		temperature: 0.2,
+		maxRetries: 2,
+		history,
+		appendPromptAsUserMessage: options.appendPromptAsUserMessage,
+		prompt: options.prompt,
+		attachments: options.files.map((file) => ({
+			name: file.name,
+			type: file.type,
+			size: file.size,
+		})),
+	});
 }
 
 export function getDisplayText(response: FinalResponse): string {
@@ -185,6 +267,21 @@ async function createAttachmentContents(
 	);
 }
 
+function parseHistoryMessages(json: string): MessageType[] {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(json) as unknown;
+	} catch {
+		throw new Error("History JSON must be valid JSON.");
+	}
+
+	if (!Array.isArray(parsed)) {
+		throw new Error("History JSON must be a JSON array of messages.");
+	}
+
+	return parsed as MessageType[];
+}
+
 async function consumeTextStream(
 	stream: ReadableStream<string>,
 	onChunk: (delta: string) => void,
@@ -205,45 +302,74 @@ async function consumeTextStream(
 	}
 }
 
-export async function runPlaygroundRequest({
-	prompt,
-	stream,
-	files,
-	onTextDelta,
-}: RunPlaygroundRequestOptions): Promise<RunPlaygroundRequestResult> {
+export async function runPlaygroundRequest(
+	options: RunPlaygroundRequestOptions,
+): Promise<RunPlaygroundRequestResult> {
+	const {
+		prompt,
+		systemPrompt,
+		stream,
+		files,
+		historyJson,
+		appendPromptAsUserMessage,
+		onTextDelta,
+		onTimelineEvent,
+	} = options;
+
+	const emit = (event: Omit<AgentTimelineItem, "id">) => {
+		onTimelineEvent?.({ ...event, id: nextTimelineId() });
+	};
+
 	const config = getPlaygroundConfig();
 
 	if (config.envError) {
 		throw new Error(config.envError);
 	}
 
+	emit({ kind: "run", title: "Run started" });
+
+	const historyMessages = parseHistoryMessages(historyJson);
 	const attachments = await createAttachmentContents(files);
 	const trimmedPrompt = prompt.trim();
-	const messageContent =
+
+	const messageContent:
+		| string
+		| readonly (
+				| AttachmentContentType
+				| { readonly type: "text"; readonly text: string }
+		  )[] =
 		attachments.length === 0
 			? trimmedPrompt
 			: [
 					...(trimmedPrompt
-						? ([{ type: "text", text: trimmedPrompt }] as const)
+						? ([{ type: "text" as const, text: trimmedPrompt }] as const)
 						: []),
 					...attachments,
 				];
 
+	const messages: MessageType[] = [...historyMessages];
+
+	if (appendPromptAsUserMessage && (trimmedPrompt || attachments.length > 0)) {
+		messages.push({
+			role: "user",
+			content: messageContent,
+		});
+	}
+
+	if (messages.length === 0) {
+		throw new Error(
+			"Add at least one message: enable “Append message as last user turn” or put messages in History JSON.",
+		);
+	}
+
 	const request = {
 		provider: "openai-codex",
 		model: "gpt-5.4",
-		system:
-			"You are a concise assistant helping validate the Hax AI client DX.",
+		system: systemPrompt,
 		stream,
 		temperature: 0.2,
 		maxRetries: 2,
-		messages: [
-			{
-				role: "user",
-				content: messageContent,
-				timestamp: Date.now(),
-			},
-		],
+		messages,
 	} satisfies AppRequestShapeType;
 
 	const client = create({
@@ -253,6 +379,8 @@ export async function runPlaygroundRequest({
 		clientSecret: config.clientSecret,
 		baseUrl: config.baseUrl,
 	});
+
+	emit({ kind: "model", title: "Calling model", detail: request.model });
 
 	const result = await client.generate(request);
 
@@ -270,6 +398,11 @@ export async function runPlaygroundRequest({
 		});
 
 		const finalResponse = await result.final();
+		emit({
+			kind: "final",
+			title: "Completed",
+			detail: finalResponse.status,
+		});
 		return {
 			finalResponse,
 			output: getDisplayText(finalResponse),
@@ -280,8 +413,14 @@ export async function runPlaygroundRequest({
 		throw new Error("Expected a batch response.");
 	}
 
+	const finalResponse = result.response;
+	emit({
+		kind: "final",
+		title: "Completed",
+		detail: finalResponse.status,
+	});
 	return {
-		finalResponse: result.response,
-		output: getDisplayText(result.response),
+		finalResponse,
+		output: getDisplayText(finalResponse),
 	};
 }

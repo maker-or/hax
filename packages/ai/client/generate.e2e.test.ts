@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { Effect } from "effect";
-import type { AppRequestShapeType } from "../index.ts";
-import { generate } from "./generate.ts";
+import type { AppRequestShapeType } from "../index.js";
+import { generate } from "./generate.js";
 
 type AxiosArgs = [string, unknown?, Record<string, unknown>?];
 type AxiosResponse = {
@@ -44,7 +44,7 @@ mock.module("@workos-inc/authkit-nextjs", () => ({
 }));
 
 const { handleRequest } = await import(
-	"../../../apps/web/app/machine/service.ts"
+	"../../../apps/web/app/machine/service.js"
 );
 
 const request: AppRequestShapeType = {
@@ -190,17 +190,13 @@ describe("generate end-to-end", () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (_input, init) => {
 			const requestHeaders = new Headers(init?.headers);
-			const authorization = requestHeaders.get("authorization") ?? undefined;
+			const authorization = requestHeaders.get("authorization");
 			const body = JSON.parse(String(init?.body));
+			if (!authorization) {
+				throw new Error("missing authorization header");
+			}
 
-			return Effect.runPromise(
-				handleRequest(
-					{
-						authorization,
-					},
-					body,
-				),
-			);
+			return Effect.runPromise(handleRequest({ authorization }, body));
 		}) as typeof globalThis.fetch;
 
 		try {
@@ -212,6 +208,9 @@ describe("generate end-to-end", () => {
 			});
 
 			expect(result.stream).toBe(true);
+			if (!result.stream) {
+				throw new Error("expected streaming result");
+			}
 			const chunks = await readTextStream(result.textStream);
 			const final = await result.final();
 
@@ -261,17 +260,13 @@ describe("generate end-to-end", () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (_input, init) => {
 			const requestHeaders = new Headers(init?.headers);
-			const authorization = requestHeaders.get("authorization") ?? undefined;
+			const authorization = requestHeaders.get("authorization");
 			const body = JSON.parse(String(init?.body));
+			if (!authorization) {
+				throw new Error("missing authorization header");
+			}
 
-			return Effect.runPromise(
-				handleRequest(
-					{
-						authorization,
-					},
-					body,
-				),
-			);
+			return Effect.runPromise(handleRequest({ authorization }, body));
 		}) as typeof globalThis.fetch;
 
 		try {

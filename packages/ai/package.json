@@ -1,18 +1,42 @@
 {
-  "name": "@hax/ai",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./index.ts"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "effect": "^3.19.19"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  }
+	"name": "@hax/ai",
+	"version": "0.1.0",
+	"type": "module",
+	"files": ["dist/**/*.js", "dist/**/*.d.ts", "README.md"],
+	"sideEffects": false,
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./openai-codex": {
+			"types": "./dist/providers/openai-codex/index.d.ts",
+			"import": "./dist/providers/openai-codex/index.js",
+			"default": "./dist/providers/openai-codex/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	},
+	"scripts": {
+		"build": "bun x tsc -p ./tsconfig.build.json",
+		"lint": "bun x @biomejs/biome check index.ts types.ts client history runtime providers package.json tsconfig.json tsconfig.build.json",
+		"typecheck": "bun x tsc -p ./tsconfig.json --noEmit",
+		"prepublishOnly": "bun run lint && bun run typecheck && bun run build"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"effect": "^3.19.19",
+		"openai": "^6.32.0"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
 }

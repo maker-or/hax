@@ -1,21 +1,24 @@
-import { Effect, Array as EffectArray, Option, pipe } from "effect";
+import { Effect, Array as EffectArray, pipe } from "effect";
 import type {
 	AttachmentContent,
 	TextContent,
 	ToolResultMessage,
 	UserMessage,
 	message,
-} from "../../types";
+} from "../../types.js";
 import type {
 	appRequestShape,
 	assistantContentPart,
+	codexFunctionTool,
 	codexInputContent,
 	codexRequestShape,
 	fileInput,
+	functionCallInputType,
+	functionToolOutputType,
 	imageInput,
 	inputMessageType,
 	textInput,
-} from "./types";
+} from "./types.js";
 
 const toTextContentPart = (content: TextContent): Effect.Effect<textInput> =>
 	Effect.succeed({
@@ -105,32 +108,38 @@ const collapseAssistantContent = (
 		? parts[0].text
 		: [...parts];
 
-const serializeAssistantContent = (
+const serializeAssistantTextContent = (
 	content: Extract<message, { role: "assistant" }>["content"],
 ): Effect.Effect<string | assistantContentPart[]> =>
 	pipe(
-		content,
+		content.filter((entry) => entry.type !== "toolcall"),
 		EffectArray.map((entry) => {
 			switch (entry.type) {
 				case "text":
 					return Effect.succeed(toAssistantTextPart(entry.text));
 				case "thinking":
 					return Effect.succeed(toAssistantTextPart(entry.thinking));
-				case "toolcall":
-					return Effect.succeed(
-						toAssistantTextPart(
-							JSON.stringify({
-								id: entry.id,
-								name: entry.name,
-								arguments: entry.arguments,
-							}),
-						),
-					);
 			}
 		}),
 		Effect.all,
 		Effect.map(collapseAssistantContent),
 	);
+
+/**
+ * This turns one assistant tool call into the native Responses API function call item.
+ */
+const serializeAssistantToolCall = (
+	entry: Extract<
+		Extract<message, { role: "assistant" }>["content"][number],
+		{ type: "toolcall" }
+	>,
+): functionCallInputType => ({
+	type: "function_call",
+	id: entry.id,
+	call_id: entry.callId ?? entry.id,
+	name: entry.name,
+	arguments: JSON.stringify(entry.arguments),
+});
 
 const serializeUserContent = (
 	userMessage: UserMessage,
@@ -173,56 +182,88 @@ const serializeToolContent = (
 
 const serializeToolResultMessage = (
 	toolMessage: ToolResultMessage,
-): Effect.Effect<inputMessageType> =>
+): Effect.Effect<functionToolOutputType> =>
 	pipe(
 		serializeToolContent(toolMessage),
-		Effect.map((content) => ({
-			role: "user" as const,
-			content:
+		Effect.map((content) => {
+			const output =
 				typeof content === "string"
-					? `[tool:${toolMessage.toolName} id=${toolMessage.toolCallId} error=${toolMessage.isError}] ${content}`
-					: [
-							{
-								type: "input_text" as const,
-								text: `[tool:${toolMessage.toolName} id=${toolMessage.toolCallId} error=${toolMessage.isError}]`,
-							},
-							...content,
-						],
-		})),
+					? content
+					: JSON.stringify({
+							content,
+							toolName: toolMessage.toolName,
+							isError: toolMessage.isError,
+						});
+
+			return {
+				type: "function_call_output" as const,
+				call_id: toolMessage.toolCallId,
+				output,
+			};
+		}),
 	);
 
 const compileMessage = (
 	item: message,
-): Effect.Effect<Option.Option<inputMessageType>> =>
+): Effect.Effect<ReadonlyArray<inputMessageType>> =>
 	(() => {
 		switch (item.role) {
 			case "user":
 				return pipe(
 					serializeUserContent(item),
-					Effect.map((content) =>
-						Option.some({
-							role: "user" as const,
-							content,
-						}),
+					Effect.map(
+						(content) =>
+							[
+								{
+									role: "user" as const,
+									content,
+								},
+							] as const,
 					),
 				);
 			case "assistant":
-				return pipe(
-					serializeAssistantContent(item.content),
-					Effect.map((content) =>
-						Option.some({
+				return Effect.gen(function* () {
+					const items: inputMessageType[] = [];
+					const textEntries = item.content.filter(
+						(entry) => entry.type !== "toolcall",
+					);
+
+					if (textEntries.length > 0) {
+						const content = yield* serializeAssistantTextContent(item.content);
+						items.push({
 							role: "assistant" as const,
 							content,
-						}),
-					),
-				);
+						});
+					}
+
+					for (const entry of item.content) {
+						if (entry.type === "toolcall") {
+							items.push(serializeAssistantToolCall(entry));
+						}
+					}
+
+					return items;
+				});
 			case "tool":
 				return pipe(
 					serializeToolResultMessage(item),
-					Effect.map((content) => Option.some(content)),
+					Effect.map((content) => [content] as const),
 				);
 		}
 	})();
+
+/**
+ * This turns a public tool definition into the Codex function tool shape.
+ */
+const compileToolDefinition = (
+	tool: NonNullable<appRequestShape["tools"]>[number],
+): codexFunctionTool => ({
+	type: "function",
+	name: tool.name,
+	description: tool.description,
+	parameters: tool.inputSchema,
+	strict: true,
+});
 
 export const compileRequest = (request: appRequestShape): codexRequestShape =>
 	Effect.runSync(
@@ -231,13 +272,19 @@ export const compileRequest = (request: appRequestShape): codexRequestShape =>
 				request.messages,
 				EffectArray.map(compileMessage),
 				Effect.all,
+				Effect.map((items) => items.flat()),
 			);
 
 			return {
 				model: request.model,
 				// Upstream requires `instructions` always present (never omit / undefined).
 				instructions: request.system ?? "",
-				input: EffectArray.filterMap(compiledMessages, (item) => item),
+				input: compiledMessages,
+				...(request.tools?.length
+					? {
+							tools: request.tools.map(compileToolDefinition),
+						}
+					: {}),
 				stream: request.stream,
 				store: false,
 			};

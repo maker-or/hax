@@ -301,10 +301,11 @@ describe("handleRequest", () => {
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toContain("application/json");
 		expect(await response.json()).toEqual({
+			status: "completed",
 			text: "Collected response",
 			content: [{ type: "text", text: "Collected response" }],
 			toolCalls: [],
-			toolResults: [],
+			approvals: [],
 			usage: {
 				input: 10,
 				output: 5,

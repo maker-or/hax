@@ -1,0 +1,24 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"noEmit": false,
+		"declaration": true,
+		"declarationMap": true,
+		"sourceMap": true,
+		"outDir": "./dist",
+		"rootDir": ".",
+		"rewriteRelativeImportExtensions": true,
+		"tsBuildInfoFile": "./dist/.tsbuildinfo"
+	},
+	"include": [
+		"./index.ts",
+		"./types.ts",
+		"./client/**/*.ts",
+		"./history/**/*.ts",
+		"./runtime/**/*.ts",
+		"./providers/**/*.ts"
+	],
+	"exclude": ["**/*.test.ts", "**/*.e2e.test.ts", "./dist"]
+}

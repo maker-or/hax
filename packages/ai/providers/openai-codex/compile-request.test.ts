@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { compileRequest } from "./compile-request.ts";
-import type { appRequestShape } from "./types.ts";
+import { compileRequest } from "./compile-request.js";
+import type { appRequestShape } from "./types.js";
 
 describe("compileRequest", () => {
 	test("compiles unified codex requests into the upstream payload", () => {
@@ -30,7 +30,8 @@ describe("compileRequest", () => {
 						},
 						{
 							type: "toolcall",
-							id: "call_1",
+							id: "fc_readme123",
+							callId: "call_1",
 							name: "read_file",
 							arguments: {
 								path: "README.md",
@@ -77,17 +78,14 @@ describe("compileRequest", () => {
 							type: "output_text",
 							text: "Need repo context first.",
 						},
-						{
-							type: "output_text",
-							text: JSON.stringify({
-								id: "call_1",
-								name: "read_file",
-								arguments: {
-									path: "README.md",
-								},
-							}),
-						},
 					],
+				},
+				{
+					type: "function_call",
+					id: "fc_readme123",
+					call_id: "call_1",
+					name: "read_file",
+					arguments: JSON.stringify({ path: "README.md" }),
 				},
 			],
 			stream: true,
@@ -157,8 +155,9 @@ describe("compileRequest", () => {
 					],
 				},
 				{
-					role: "user",
-					content: "[tool:vision id=tool_1 error=false] Detected a graph.",
+					type: "function_call_output",
+					call_id: "tool_1",
+					output: "Detected a graph.",
 				},
 			],
 			stream: false,
@@ -236,18 +235,19 @@ describe("compileRequest", () => {
 					],
 				},
 				{
-					role: "user",
-					content: [
-						{
-							type: "input_text",
-							text: "[tool:fetch_report id=tool_2 error=false]",
-						},
-						{
-							type: "input_file",
-							file_id: "file_123",
-							filename: "notes.txt",
-						},
-					],
+					type: "function_call_output",
+					call_id: "tool_2",
+					output: JSON.stringify({
+						content: [
+							{
+								type: "input_file",
+								file_id: "file_123",
+								filename: "notes.txt",
+							},
+						],
+						toolName: "fetch_report",
+						isError: false,
+					}),
 				},
 			],
 			stream: false,

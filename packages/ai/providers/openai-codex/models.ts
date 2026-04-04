@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CodexModelsSchema } from "./types";
+import { CodexModelsSchema } from "./types.js";
 
 const rawOpenaiCodex = {
 	"gpt-5.1": {
