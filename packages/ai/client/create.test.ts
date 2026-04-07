@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { AppRequestShapeType, UnifiedResponseType } from "../index.js";
-import { create } from "./create.js";
+import type { AppRequestShapeType, UnifiedResponseType } from "../index.ts";
+import { create } from "./create.ts";
 
 const originalFetch = globalThis.fetch;
 

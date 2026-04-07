@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { UnifiedResponseType } from "../index.js";
-import { consumeUnifiedStream } from "./consume-unified-stream.js";
+import type { UnifiedResponseType } from "../index.ts";
+import { consumeUnifiedStream } from "./consume-unified-stream.ts";
 
 function createSseResponse(body: string, init?: ResponseInit): Response {
 	return new Response(body, {
@@ -88,7 +88,23 @@ describe("consumeUnifiedStream", () => {
 
 	test("rejects final and errors the stream when the machine sends an error event", async () => {
 		const response = createSseResponse(
-			["event: error", 'data: {"message":"machine failed"}', ""].join("\n"),
+			[
+				"event: error",
+				`data: ${JSON.stringify({
+					type: "error",
+					reason: "error",
+					error: {
+						status: "failed",
+						content: [],
+						toolCalls: [],
+						approvals: [],
+						warnings: [],
+						finishReason: "error",
+						errorMessage: "machine failed",
+					},
+				})}`,
+				"",
+			].join("\n"),
 		);
 
 		const result = consumeUnifiedStream(response);
@@ -108,5 +124,81 @@ describe("consumeUnifiedStream", () => {
 		expect((textFailure as Error).message).toContain("machine failed");
 		expect(finalFailure).toBeInstanceOf(Error);
 		expect((finalFailure as Error).message).toContain("machine failed");
+	});
+
+	test("exposes pi-mono-shaped events while keeping textStream and final()", async () => {
+		const partialBase = {
+			status: "in_progress" as const,
+			content: [] as { type: "text"; text: string }[],
+			toolCalls: [],
+			approvals: [],
+			warnings: [],
+		};
+		const finalResponse: UnifiedResponseType = {
+			status: "completed",
+			text: "Hi",
+			content: [{ type: "text", text: "Hi" }],
+			toolCalls: [],
+			approvals: [],
+			finishReason: "stop",
+			providerMetadata: { provider: "openai-codex", responseId: "r1" },
+			warnings: [],
+		};
+
+		const response = createSseResponse(
+			[
+				"event: start",
+				`data: ${JSON.stringify({ type: "start", partial: { ...partialBase, text: "" } })}`,
+				"",
+				"event: text_start",
+				`data: ${JSON.stringify({
+					type: "text_start",
+					contentIndex: 0,
+					partial: { ...partialBase, text: "" },
+				})}`,
+				"",
+				"event: text_delta",
+				`data: ${JSON.stringify({
+					type: "text_delta",
+					contentIndex: 0,
+					delta: "Hi",
+					partial: { ...partialBase, text: "Hi" },
+				})}`,
+				"",
+				"event: text_end",
+				`data: ${JSON.stringify({
+					type: "text_end",
+					contentIndex: 0,
+					content: "Hi",
+					partial: { ...partialBase, text: "Hi" },
+				})}`,
+				"",
+				"event: done",
+				`data: ${JSON.stringify({
+					type: "done",
+					reason: "stop",
+					message: finalResponse,
+				})}`,
+				"",
+			].join("\n"),
+		);
+
+		const result = consumeUnifiedStream(response);
+		const kinds: string[] = [];
+		for await (const ev of result.events) {
+			kinds.push(ev.type);
+		}
+		const chunks = await readTextStream(result.textStream);
+		const final = await result.final();
+
+		expect(kinds).toEqual([
+			"start",
+			"text_start",
+			"text_delta",
+			"text_end",
+			"done",
+		]);
+		expect(chunks).toEqual(["Hi"]);
+		expect(final).toEqual(finalResponse);
 	});
 });

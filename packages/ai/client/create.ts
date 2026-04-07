@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import type { appRequestShape } from "../providers/openai-codex/types.js";
-import type { CreateClientOptions, UnifiedGenerateResult } from "../types.js";
-import { generate } from "./generate.js";
-import { refreshAccessToken as refreshTokens } from "./refresh-access-token.js";
+import type { appRequestShape } from "../providers/openai-codex/types.ts";
+import type { CreateClientOptions, UnifiedGenerateResult } from "../types.ts";
+import { generate } from "./generate.ts";
+import { refreshAccessToken as refreshTokens } from "./refresh-access-token.ts";
 
 /**
  * This is the AI client you get from `create()`.

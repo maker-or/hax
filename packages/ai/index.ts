@@ -24,7 +24,22 @@ export {
 	ResponseContentPart,
 	ProviderMetadata,
 	UnifiedResponse,
-} from "./types.js";
+	UnifiedStreamDoneReason,
+	UnifiedStreamEvent,
+	UnifiedStreamEventApprovalRequired,
+	UnifiedStreamEventDone,
+	UnifiedStreamEventError,
+	UnifiedStreamEventStart,
+	UnifiedStreamEventTextDelta,
+	UnifiedStreamEventTextEnd,
+	UnifiedStreamEventTextStart,
+	UnifiedStreamEventThinkingDelta,
+	UnifiedStreamEventThinkingEnd,
+	UnifiedStreamEventThinkingStart,
+	UnifiedStreamEventToolcallDelta,
+	UnifiedStreamEventToolcallEnd,
+	UnifiedStreamEventToolcallStart,
+} from "./types.ts";
 
 export type {
 	BaseModel as BaseModelType,
@@ -52,6 +67,9 @@ export type {
 	ResponseContentPart as ResponseContentPartType,
 	ProviderMetadata as ProviderMetadataType,
 	UnifiedResponse as UnifiedResponseType,
+	UnifiedResponseStreamCoreResult as UnifiedResponseStreamCoreResultType,
+	UnifiedStreamDoneReasonType as UnifiedStreamDoneReasonPayload,
+	UnifiedStreamEventType as UnifiedStreamEventPayload,
 	UnifiedResponseBatchResult as UnifiedResponseBatchResultType,
 	UnifiedGenerateResult as UnifiedGenerateResultType,
 	UnifiedResponseStreamingResult as UnifiedResponseStreamingResultType,
@@ -60,7 +78,7 @@ export type {
 	CreateClientOptions as CreateClientOptionsType,
 	ToolExecute as ToolExecuteType,
 	Tool as ToolType,
-} from "./types.js";
+} from "./types.ts";
 
 export {
 	CodexResponseStatus,
@@ -70,7 +88,7 @@ export {
 	appRequestShape,
 	codexRequestShape,
 	CodexModelsSchema,
-} from "./providers/openai-codex/types.js";
+} from "./providers/openai-codex/types.ts";
 
 export type {
 	CodexResponseStatus as CodexResponseStatusType,
@@ -80,19 +98,26 @@ export type {
 	appRequestShape as AppRequestShapeType,
 	CodexModelsSchema as CodexModelsSchemaType,
 	codexRequestShape as CodexRequestShapeType,
-} from "./providers/openai-codex/types.js";
+} from "./providers/openai-codex/types.ts";
 
-export { compileRequest } from "./providers/openai-codex/compile-request.js";
-export { openaiCodex } from "./providers/openai-codex/models.js";
+export { compileRequest } from "./providers/openai-codex/compile-request.ts";
+export { openaiCodex } from "./providers/openai-codex/models.ts";
 export {
 	emptyAccumulator,
 	mapChunk,
+	parseToolCallItem,
 	toUnifiedSnapshot,
-} from "./providers/openai-codex/map-response.js";
-export { createUnifiedResponseStream } from "./runtime/unified-response-stream.js";
-export { create } from "./client/create.js";
-export { generate } from "./client/generate.js";
-export type { Client, Client as ClientType } from "./client/create.js";
+} from "./providers/openai-codex/map-response.ts";
+export {
+	approvalToolConfigFromRequest,
+	codexUnifiedStreamEvents,
+	unifiedStreamDoneReason,
+} from "./providers/openai-codex/stream-events.ts";
+export { createUnifiedResponseStream } from "./runtime/unified-response-stream.ts";
+export { unifiedResponseForStreamError } from "./runtime/unified-response-error.ts";
+export { create } from "./client/create.ts";
+export { generate } from "./client/generate.ts";
+export type { Client, Client as ClientType } from "./client/create.ts";
 export {
 	appendAssistantFromUnifiedResponse,
 	emptyUsage,
@@ -100,8 +125,8 @@ export {
 	normalizeToolArgumentsForHistory,
 	toolExecutionToMessage,
 	unifiedResponseToAssistantMessage,
-} from "./history/from-unified-response.js";
+} from "./history/from-unified-response.ts";
 export type {
 	ToolExecutionToMessageInput,
 	UnifiedResponseToAssistantOptions,
-} from "./history/from-unified-response.js";
+} from "./history/from-unified-response.ts";

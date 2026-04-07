@@ -8,7 +8,7 @@ import type {
 	Usage,
 	baseAssistantMessage,
 	message,
-} from "../types.js";
+} from "../types.ts";
 
 /** This is the mutable assistant content list we build before returning a `baseAssistantMessage`. */
 type AssistantContentBlock = baseAssistantMessage["content"][number];

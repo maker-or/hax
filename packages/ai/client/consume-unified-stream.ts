@@ -1,26 +1,109 @@
-import { createUnifiedResponseStream } from "../runtime/unified-response-stream.js";
+import { unifiedStreamDoneReason } from "../providers/openai-codex/stream-events.ts";
+import { unifiedResponseForStreamError } from "../runtime/unified-response-error.ts";
+import { createUnifiedResponseStream } from "../runtime/unified-response-stream.ts";
 import type {
 	UnifiedResponse,
 	UnifiedResponseStreamController,
 	UnifiedResponseStreamingResult,
-} from "../types.js";
+	UnifiedStreamEventType,
+} from "../types.ts";
 
 type UnifiedSseFrame = {
 	event: string;
 	data: string;
 };
 
+/**
+ * This turns a machine streaming `fetch` `Response` into `textStream`, `final()`, and a pi-mono-style `events` async iterator.
+ */
 export function consumeUnifiedStream(
 	response: Response,
 ): UnifiedResponseStreamingResult {
 	const stream = createUnifiedResponseStream();
-	void processUnifiedStream(response, stream.controller);
-	return stream.result;
+	const eventQueue: UnifiedStreamEventType[] = [];
+	type EventWaiter = {
+		resolve: (value: IteratorResult<UnifiedStreamEventType>) => void;
+		reject: (cause: unknown) => void;
+	};
+	const eventWaiters: EventWaiter[] = [];
+	let eventsClosed = false;
+	let pumpError: unknown;
+
+	const pushStreamEvent = (event: UnifiedStreamEventType) => {
+		const waiter = eventWaiters.shift();
+		if (waiter !== undefined) {
+			waiter.resolve({ value: event, done: false });
+		} else {
+			eventQueue.push(event);
+		}
+	};
+
+	const closeStreamEvents = () => {
+		if (eventsClosed) {
+			return;
+		}
+		eventsClosed = true;
+		while (eventWaiters.length > 0) {
+			const waiter = eventWaiters.shift();
+			if (waiter === undefined) {
+				break;
+			}
+			if (pumpError !== undefined) {
+				waiter.reject(pumpError);
+			} else {
+				waiter.resolve({ value: undefined, done: true });
+			}
+		}
+	};
+
+	void processUnifiedStream(
+		response,
+		stream.controller,
+		pushStreamEvent,
+		closeStreamEvents,
+		(cause) => {
+			pumpError = cause;
+		},
+	);
+
+	const events: AsyncIterable<UnifiedStreamEventType> = {
+		[Symbol.asyncIterator](): AsyncIterator<UnifiedStreamEventType> {
+			return {
+				async next(): Promise<IteratorResult<UnifiedStreamEventType>> {
+					if (pumpError !== undefined) {
+						throw pumpError;
+					}
+					if (eventQueue.length > 0) {
+						return {
+							value: eventQueue.shift() as UnifiedStreamEventType,
+							done: false,
+						};
+					}
+					if (eventsClosed) {
+						return { value: undefined, done: true };
+					}
+					return await new Promise<IteratorResult<UnifiedStreamEventType>>(
+						(resolve, reject) => {
+							eventWaiters.push({ resolve, reject });
+						},
+					);
+				},
+			};
+		},
+	};
+
+	return {
+		...stream.result,
+		events,
+	};
 }
 
 async function processUnifiedStream(
 	response: Response,
 	controller: UnifiedResponseStreamController,
+	onStreamEvent: (event: UnifiedStreamEventType) => void,
+	onEventsClosed: () => void,
+	onPumpError: (cause: unknown) => void,
 ): Promise<void> {
 	try {
 		await assertReadableResponse(response);
@@ -30,10 +113,18 @@ async function processUnifiedStream(
 		}
 
 		for await (const frame of parseUnifiedSse(body)) {
-			applyUnifiedEvent(frame, controller);
+			const parsed = unifiedEventFromFrame(frame);
+			if (parsed === undefined) {
+				continue;
+			}
+			onStreamEvent(parsed);
+			applyUnifiedStreamEvent(parsed, controller);
 		}
 	} catch (cause) {
 		controller.error(cause);
+		onPumpError(cause);
+	} finally {
+		onEventsClosed();
 	}
 }
 
@@ -108,31 +199,102 @@ async function* parseUnifiedSse(
 	}
 }
 
-function applyUnifiedEvent(
+/**
+ * This maps one SSE frame to a unified stream payload when the `data` line is JSON with a `type` field, or handles legacy `text` / `final` frames.
+ */
+function unifiedEventFromFrame(
 	frame: UnifiedSseFrame,
+): UnifiedStreamEventType | undefined {
+	let parsedJson: unknown;
+	try {
+		parsedJson = JSON.parse(frame.data);
+	} catch {
+		return undefined;
+	}
+
+	if (frame.event === "text") {
+		const payload = parsedJson as { delta?: unknown };
+		const delta = typeof payload.delta === "string" ? payload.delta : "";
+		return {
+			type: "text_delta",
+			contentIndex: 0,
+			delta,
+			partial: {
+				status: "in_progress",
+				content: [],
+				toolCalls: [],
+				approvals: [],
+				warnings: [],
+			},
+		};
+	}
+
+	if (frame.event === "final") {
+		const message = parsedJson as UnifiedResponse;
+		return {
+			type: "done",
+			reason: unifiedStreamDoneReason(message.finishReason ?? "stop"),
+			message,
+		};
+	}
+
+	if (frame.event === "error") {
+		const payload = parsedJson as {
+			type?: unknown;
+			reason?: unknown;
+			message?: unknown;
+			error?: unknown;
+		};
+		const reason: "error" | "aborted" =
+			payload.reason === "aborted" || payload.reason === "abort"
+				? "aborted"
+				: "error";
+		if (
+			payload.type === "error" &&
+			payload.error &&
+			typeof payload.error === "object"
+		) {
+			return {
+				type: "error",
+				reason,
+				error: payload.error as UnifiedResponse,
+			};
+		}
+		const legacyMessage =
+			typeof payload.message === "string"
+				? payload.message
+				: "Unified stream failed";
+		return {
+			type: "error",
+			reason,
+			error: unifiedResponseForStreamError(legacyMessage),
+		};
+	}
+
+	const payload = parsedJson as UnifiedStreamEventType;
+	if (payload && typeof payload === "object" && "type" in payload) {
+		return payload;
+	}
+
+	return undefined;
+}
+
+function applyUnifiedStreamEvent(
+	event: UnifiedStreamEventType,
 	controller: UnifiedResponseStreamController,
 ): void {
-	switch (frame.event) {
-		case "text": {
-			const payload = JSON.parse(frame.data) as { delta?: unknown };
-			controller.pushText(
-				typeof payload.delta === "string" ? payload.delta : "",
-			);
+	switch (event.type) {
+		case "text_delta": {
+			controller.pushText(event.delta);
 			return;
 		}
-		case "final": {
-			const payload = JSON.parse(frame.data) as UnifiedResponse;
-			controller.complete(payload);
+		case "done": {
+			controller.complete(event.message);
 			return;
 		}
 		case "error": {
-			const payload = JSON.parse(frame.data) as { message?: unknown };
 			controller.error(
-				new Error(
-					typeof payload.message === "string"
-						? payload.message
-						: "Unified stream failed",
-				),
+				new Error(event.error.errorMessage ?? "Unified stream failed"),
 			);
 			return;
 		}

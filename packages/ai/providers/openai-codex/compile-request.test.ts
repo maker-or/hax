@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { compileRequest } from "./compile-request.js";
-import type { appRequestShape } from "./types.js";
+import { compileRequest } from "./compile-request.ts";
+import type { appRequestShape } from "./types.ts";
 
 describe("compileRequest", () => {
 	test("compiles unified codex requests into the upstream payload", () => {

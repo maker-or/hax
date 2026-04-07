@@ -8,8 +8,9 @@
 		"jsx": "react-jsx",
 		"allowJs": true,
 
-		// Bundler mode (`.js` in imports resolves to `.ts` sources for editor + `tsc`)
+		// Bundler mode; explicit `.ts` paths match on-disk sources (Turbopack) and rewrite to `.js` on emit.
 		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
 		"verbatimModuleSyntax": true,
 		"noEmit": true,
 
@@ -34,5 +35,5 @@
 		"./runtime/**/*.ts",
 		"./providers/**/*.ts"
 	],
-	"exclude": ["./dist", "./node_modules"]
+	"exclude": ["./dist", "./node_modules", "**/*.e2e.test.ts"]
 }

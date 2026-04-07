@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { AppRequestShapeType, UnifiedResponseType } from "../index.js";
-import { generate } from "./generate.js";
+import type { AppRequestShapeType, UnifiedResponseType } from "../index.ts";
+import { generate } from "./generate.ts";
 
 const streamingRequest: AppRequestShapeType = {
 	provider: "openai-codex",

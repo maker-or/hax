@@ -11,7 +11,7 @@ In any thread or conversation , if we are trying to add a new feauther or decide
 
 btca ask -r resource -q "your question"
 
-resource -> pi_mono and tanstack_ai
+resource -> pi-mono and tanstack_ai
 <!-- btca-cli-end -->
 
 <!-- convex-ai-start -->

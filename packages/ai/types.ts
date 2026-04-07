@@ -369,10 +369,143 @@ export type ResponseContentPart = typeof ResponseContentPart.Type;
 export type ProviderMetadata = typeof ProviderMetadata.Type;
 export type UnifiedResponse = typeof UnifiedResponse.Type;
 
-export type UnifiedResponseStreamingResult = {
+/**
+ * This matches pi-mono `done` success reasons (`StopReason` subset); we map Codex `finishReason` into these three.
+ */
+export const UnifiedStreamDoneReason = Schema.Literal(
+	"stop",
+	"length",
+	"toolUse",
+);
+
+export type UnifiedStreamDoneReasonType = typeof UnifiedStreamDoneReason.Type;
+
+/**
+ * This is one live frame in the unified machine SSE stream.
+ * Shape follows pi-mono `AssistantMessageEvent`: same event names and fields, with `UnifiedResponse` instead of `AssistantMessage` and `ResponseToolCallPart` instead of `ToolCall` on `toolcall_end`.
+ * We add `approval_required` when a tool is marked `requiresApproval` in the request.
+ */
+export const UnifiedStreamEventStart = Schema.Struct({
+	type: Schema.Literal("start"),
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventTextStart = Schema.Struct({
+	type: Schema.Literal("text_start"),
+	contentIndex: Schema.Number,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventTextDelta = Schema.Struct({
+	type: Schema.Literal("text_delta"),
+	contentIndex: Schema.Number,
+	delta: Schema.String,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventTextEnd = Schema.Struct({
+	type: Schema.Literal("text_end"),
+	contentIndex: Schema.Number,
+	content: Schema.String,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventThinkingStart = Schema.Struct({
+	type: Schema.Literal("thinking_start"),
+	contentIndex: Schema.Number,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventThinkingDelta = Schema.Struct({
+	type: Schema.Literal("thinking_delta"),
+	contentIndex: Schema.Number,
+	delta: Schema.String,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventThinkingEnd = Schema.Struct({
+	type: Schema.Literal("thinking_end"),
+	contentIndex: Schema.Number,
+	content: Schema.String,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventToolcallStart = Schema.Struct({
+	type: Schema.Literal("toolcall_start"),
+	contentIndex: Schema.Number,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventToolcallDelta = Schema.Struct({
+	type: Schema.Literal("toolcall_delta"),
+	contentIndex: Schema.Number,
+	delta: Schema.String,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventToolcallEnd = Schema.Struct({
+	type: Schema.Literal("toolcall_end"),
+	contentIndex: Schema.Number,
+	toolCall: ResponseToolCallPart,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventApprovalRequired = Schema.Struct({
+	type: Schema.Literal("approval_required"),
+	approval: ApprovalRequest,
+	partial: UnifiedResponse,
+});
+
+export const UnifiedStreamEventDone = Schema.Struct({
+	type: Schema.Literal("done"),
+	reason: UnifiedStreamDoneReason,
+	message: UnifiedResponse,
+});
+
+export const UnifiedStreamEventError = Schema.Struct({
+	type: Schema.Literal("error"),
+	reason: Schema.Literal("error", "aborted"),
+	error: UnifiedResponse,
+});
+
+/**
+ * This is the full union of stream frames the machine may send (SSE `event` name matches `type`).
+ */
+export const UnifiedStreamEvent = Schema.Union(
+	UnifiedStreamEventStart,
+	UnifiedStreamEventTextStart,
+	UnifiedStreamEventTextDelta,
+	UnifiedStreamEventTextEnd,
+	UnifiedStreamEventThinkingStart,
+	UnifiedStreamEventThinkingDelta,
+	UnifiedStreamEventThinkingEnd,
+	UnifiedStreamEventToolcallStart,
+	UnifiedStreamEventToolcallDelta,
+	UnifiedStreamEventToolcallEnd,
+	UnifiedStreamEventApprovalRequired,
+	UnifiedStreamEventDone,
+	UnifiedStreamEventError,
+);
+
+export type UnifiedStreamEventType = typeof UnifiedStreamEvent.Type;
+
+/**
+ * This is the streaming handle before optional `events` is attached (internal stream pump).
+ */
+export type UnifiedResponseStreamCoreResult = {
 	readonly stream: true;
 	readonly textStream: ReadableStream<string>;
 	final(): Promise<UnifiedResponse>;
+};
+
+/**
+ * This is what `generate({ stream: true })` returns: text stream, typed event iterator, and `final()`.
+ */
+export type UnifiedResponseStreamingResult = UnifiedResponseStreamCoreResult & {
+	/**
+	 * This yields every unified stream frame as it arrives (pi-mono-style `for await` over events).
+	 */
+	readonly events: AsyncIterable<UnifiedStreamEventType>;
 };
 
 export type UnifiedResponseBatchResult = {
@@ -391,7 +524,7 @@ export type UnifiedResponseStreamController = {
 };
 
 export type CreateUnifiedResponseStreamResult = {
-	result: UnifiedResponseStreamingResult;
+	result: UnifiedResponseStreamCoreResult;
 	controller: UnifiedResponseStreamController;
 };
 

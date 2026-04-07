@@ -2,11 +2,14 @@ import {
 	type AppRequestShapeType,
 	type UnifiedResponseType,
 	appRequestShape,
+	approvalToolConfigFromRequest,
+	codexUnifiedStreamEvents,
 	compileRequest,
 	emptyAccumulator,
 	mapChunk,
 	openaiCodex,
 	toUnifiedSnapshot,
+	unifiedResponseForStreamError,
 } from "@hax/ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
@@ -372,7 +375,15 @@ async function collectUnifiedResponse(
 function createUnifiedStreamingResponse(
 	body: UpstreamPayload,
 	headers: Headers,
+	options: { runId: string; tools: AppRequestShapeType["tools"] },
 ): Response {
+	const approvalByToolName = approvalToolConfigFromRequest(options.tools);
+	const toolCallStartSent = new Set<string>();
+	const toolCallEndSent = new Set<string>();
+	const textBlockStarted = new Set<number>();
+	const reasoningSummaryStarted = new Set<number>();
+	const reasoningTextStarted = new Set<number>();
+
 	const responseStream = new ReadableStream<Uint8Array>({
 		async start(controller) {
 			let acc = emptyAccumulator();
@@ -380,8 +391,19 @@ function createUnifiedStreamingResponse(
 			try {
 				for await (const event of parseCodexEvents(body)) {
 					acc = mapChunk(acc, event);
-					if (event.type === "response.output_text.delta") {
-						controller.enqueue(encodeSseEvent("text", { delta: event.delta }));
+					const frames = codexUnifiedStreamEvents({
+						event,
+						next: acc,
+						runId: options.runId,
+						approvalByToolName,
+						toolCallStartSent,
+						toolCallEndSent,
+						textBlockStarted,
+						reasoningSummaryStarted,
+						reasoningTextStarted,
+					});
+					for (const frame of frames) {
+						controller.enqueue(encodeSseEvent(frame.type, frame));
 					}
 				}
 
@@ -391,13 +413,13 @@ function createUnifiedStreamingResponse(
 					});
 				}
 
-				const finalResponse = toUnifiedSnapshot(acc);
-				controller.enqueue(encodeSseEvent("final", finalResponse));
 				controller.close();
 			} catch (error) {
 				controller.enqueue(
 					encodeSseEvent("error", {
-						message: stringifyUnknown(error),
+						type: "error",
+						reason: "error",
+						error: unifiedResponseForStreamError(stringifyUnknown(error)),
 					}),
 				);
 				controller.close();
@@ -832,7 +854,10 @@ function sendUpstream(
 		passthroughHeaders.set("x-machine-request-id", context.requestId);
 
 		if (request.stream) {
-			return createUnifiedStreamingResponse(res.data, passthroughHeaders);
+			return createUnifiedStreamingResponse(res.data, passthroughHeaders, {
+				runId: context.requestId,
+				tools: request.tools,
+			});
 		}
 
 		const finalResponse = yield* Effect.tryPromise({

@@ -1,11 +1,11 @@
-import type { appRequestShape } from "../providers/openai-codex/types.js";
+import type { appRequestShape } from "../providers/openai-codex/types.ts";
 import type {
 	UnifiedGenerateResult,
 	UnifiedResponse,
 	UnifiedResponseBatchResult,
 	UnifiedResponseStreamingResult,
-} from "../types.js";
-import { consumeUnifiedStream } from "./consume-unified-stream.js";
+} from "../types.ts";
+import { consumeUnifiedStream } from "./consume-unified-stream.ts";
 
 type GenerateOptions = {
 	endpoint: string;

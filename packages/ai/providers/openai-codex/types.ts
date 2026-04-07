@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { BaseModel, ToolDefinition, message } from "../../types.js";
+import { BaseModel, ToolDefinition, message } from "../../types.ts";
 
 export const CodexResponseStatus = Schema.Literal(
 	"completed",

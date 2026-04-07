@@ -93,6 +93,8 @@ function codexSseResponse(args: {
 		"",
 		`data: ${JSON.stringify({
 			type: "response.output_item.added",
+			output_index: 0,
+			sequence_number: 0,
 			item: {
 				id: args.messageId,
 				type: "message",
@@ -101,11 +103,21 @@ function codexSseResponse(args: {
 		"",
 		`data: ${JSON.stringify({
 			type: "response.output_text.delta",
+			content_index: 0,
 			delta: args.delta,
+			item_id: args.messageId,
+			output_index: 0,
+			sequence_number: 1,
+			logprobs: [],
 		})}`,
 		"",
 		`data: ${JSON.stringify({
 			type: "response.output_text.done",
+			item_id: args.messageId,
+			output_index: 0,
+			sequence_number: 2,
+			text: args.delta,
+			logprobs: [],
 		})}`,
 		"",
 		`data: ${JSON.stringify({
@@ -238,8 +250,12 @@ describe("handleRequest", () => {
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toContain("text/event-stream");
 		const body = await response.text();
-		expect(body).toContain('event: text\ndata: {"delta":"Hello world"}');
-		expect(body).toContain("event: final");
+		expect(body).toContain("event: start");
+		expect(body).toContain("event: text_start");
+		expect(body).toContain("event: text_delta");
+		expect(body).toContain("event: text_end");
+		expect(body).toContain("event: done");
+		expect(body).toContain('"delta":"Hello world"');
 		expect(body).toContain('"text":"Hello world"');
 		expect(body).toContain('"responseId":"resp_123"');
 		expect(body).toContain('"messageId":"msg_123"');

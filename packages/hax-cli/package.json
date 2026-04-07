@@ -1,0 +1,48 @@
+{
+	"name": "@hax/cli",
+	"version": "0.1.0",
+	"description": "Hax CLI — Hax sign-in, provider connections, and Convex credentials",
+	"type": "module",
+	"bin": {
+		"hax": "./bin/run.js"
+	},
+	"files": ["bin", "dist"],
+	"imports": {
+		"#convex/api": {
+			"types": "../../convex/_generated/api.d.ts",
+			"default": "../../convex/_generated/api.js"
+		}
+	},
+	"oclif": {
+		"bin": "hax",
+		"dirname": "hax",
+		"commands": "./dist/commands",
+		"topicSeparator": " ",
+		"hooks": {
+			"postrun": "./dist/hooks/postrun.js"
+		}
+	},
+	"scripts": {
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"lint": "biome check .",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"prepack": "bun run build"
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"dependencies": {
+		"@oclif/core": "^4.2.10",
+		"convex": "^1.34.0",
+		"dotenv": "^16.4.7",
+		"inquirer": "^13.4.0",
+		"keytar": "^7.9.0",
+		"ora": "^9.3.0",
+		"semver": "^7.7.2"
+	},
+	"devDependencies": {
+		"@types/node": "^24.10.1",
+		"@types/semver": "^7.7.0",
+		"typescript": "~5.9.3"
+	}
+}

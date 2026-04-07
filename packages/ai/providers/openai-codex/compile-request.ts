@@ -5,7 +5,7 @@ import type {
 	ToolResultMessage,
 	UserMessage,
 	message,
-} from "../../types.js";
+} from "../../types.ts";
 import type {
 	appRequestShape,
 	assistantContentPart,
@@ -18,7 +18,7 @@ import type {
 	imageInput,
 	inputMessageType,
 	textInput,
-} from "./types.js";
+} from "./types.ts";
 
 const toTextContentPart = (content: TextContent): Effect.Effect<textInput> =>
 	Effect.succeed({

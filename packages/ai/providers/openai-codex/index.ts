@@ -1,5 +1,5 @@
-export { compileRequest } from "./compile-request.js";
-export { openaiCodex } from "./models.js";
+export { compileRequest } from "./compile-request.ts";
+export { openaiCodex } from "./models.ts";
 export {
 	CodexResponseStatus,
 	CodexReasoningEffort,
@@ -8,7 +8,7 @@ export {
 	appRequestShape,
 	codexRequestShape,
 	CodexModelsSchema,
-} from "./types.js";
+} from "./types.ts";
 
 export type {
 	CodexResponseStatus as CodexResponseStatusType,
@@ -18,4 +18,4 @@ export type {
 	appRequestShape as AppRequestShapeType,
 	CodexModelsSchema as CodexModelsSchemaType,
 	codexRequestShape as CodexRequestShapeType,
-} from "./types.js";
+} from "./types.ts";

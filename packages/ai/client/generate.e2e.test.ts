@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { Effect } from "effect";
-import type { AppRequestShapeType } from "../index.js";
-import { generate } from "./generate.js";
+import type { AppRequestShapeType } from "../index.ts";
+import { generate } from "./generate.ts";
 
 type AxiosArgs = [string, unknown?, Record<string, unknown>?];
 type AxiosResponse = {
@@ -44,7 +44,7 @@ mock.module("@workos-inc/authkit-nextjs", () => ({
 }));
 
 const { handleRequest } = await import(
-	"../../../apps/web/app/machine/service.js"
+	"../../../apps/web/app/machine/service.ts"
 );
 
 const request: AppRequestShapeType = {
@@ -81,6 +81,8 @@ function codexSseResponse(args: {
 		"",
 		`data: ${JSON.stringify({
 			type: "response.output_item.added",
+			output_index: 0,
+			sequence_number: 0,
 			item: {
 				id: args.messageId,
 				type: "message",
@@ -89,11 +91,21 @@ function codexSseResponse(args: {
 		"",
 		`data: ${JSON.stringify({
 			type: "response.output_text.delta",
+			content_index: 0,
 			delta: args.delta,
+			item_id: args.messageId,
+			output_index: 0,
+			sequence_number: 1,
+			logprobs: [],
 		})}`,
 		"",
 		`data: ${JSON.stringify({
 			type: "response.output_text.done",
+			item_id: args.messageId,
+			output_index: 0,
+			sequence_number: 2,
+			text: args.delta,
+			logprobs: [],
 		})}`,
 		"",
 		`data: ${JSON.stringify({

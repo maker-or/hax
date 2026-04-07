@@ -2,7 +2,7 @@ import type {
 	CreateUnifiedResponseStreamResult,
 	UnifiedResponse,
 	UnifiedResponseStreamController,
-} from "../types.js";
+} from "../types.ts";
 
 export function createUnifiedResponseStream(): CreateUnifiedResponseStreamResult {
 	let textController: ReadableStreamDefaultController<string> | undefined;

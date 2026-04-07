@@ -10,7 +10,7 @@ import type {
 	RunStatus,
 	UnifiedResponse,
 	Usage,
-} from "../../types.js";
+} from "../../types.ts";
 
 export type Accumulator = {
 	internal: {
@@ -72,7 +72,9 @@ function runStatusFromFinishReason(
 	}
 }
 
-function parseToolCallItem(item: unknown): ResponseToolCallPart | undefined {
+export function parseToolCallItem(
+	item: unknown,
+): ResponseToolCallPart | undefined {
 	if (!item || typeof item !== "object") {
 		return undefined;
 	}

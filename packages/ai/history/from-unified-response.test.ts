@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { UnifiedResponse } from "../types.js";
+import type { UnifiedResponse } from "../types.ts";
 import {
 	appendAssistantFromUnifiedResponse,
 	emptyUsage,
@@ -7,7 +7,7 @@ import {
 	normalizeToolArgumentsForHistory,
 	toolExecutionToMessage,
 	unifiedResponseToAssistantMessage,
-} from "./from-unified-response.js";
+} from "./from-unified-response.ts";
 
 function baseResponse(
 	overrides: Partial<UnifiedResponse> = {},

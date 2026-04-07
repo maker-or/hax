@@ -1,426 +1,345 @@
-import {
-	type AppRequestShapeType,
-	type AttachmentContentType,
-	type MessageType,
-	type UnifiedResponseType,
-	create,
+import { create } from "@hax/ai";
+import type {
+	CreateClientOptionsType,
+	ToolDefinitionType,
+	UnifiedResponseType,
+	UnifiedStreamEventPayload,
+	appRequestShape,
 } from "@hax/ai";
+import * as z from "zod";
 
-export type FinalResponse = UnifiedResponseType;
+type PlaygroundClientConfigResult =
+	| { ok: true; options: CreateClientOptionsType }
+	| { ok: false; error: string };
 
-export const DEFAULT_PROMPT = "Write a haiku about validating AI DX.";
-export const DEFAULT_SYSTEM_PROMPT =
-	"You are a concise assistant helping validate the Hax AI client DX.";
-export const DEFAULT_HISTORY_JSON = "[]";
-
-/**
- * This is one row in the playground activity timeline (run, model step, tools, etc.).
- */
-export type AgentTimelineItem = {
-	id: string;
-	kind: "run" | "model" | "tool-call" | "approval" | "tool-result" | "final";
-	title: string;
-	detail?: string;
-	input?: unknown;
-	output?: unknown;
-};
+let haxClient: ReturnType<typeof create> | undefined;
+let cachedClientBaseUrl: string | undefined;
 
 /**
- * This is what the UI shows when the machine asks to approve a tool call.
+ * This makes a timestamped trace message for debugging.
  */
-export type PlaygroundApprovalRequest = {
-	toolName: string;
-	input: unknown;
-};
-
-/**
- * This is the caller’s answer to an approval prompt in the playground.
- */
-export type PlaygroundApprovalDecision = {
-	approved: boolean;
-	reason?: string;
-};
-
-/**
- * Holds machine API settings loaded from Vite env. Used only for local playground runs.
- * Expects `VITE_*` variables in `apps/playground/src/.env`.
- */
-export type PlaygroundConfig = {
-	baseUrl: string;
-	accessToken: string;
-	refreshToken: string;
-	clientId: string;
-	clientSecret: string;
-	envError: string;
-};
-
-export type RunPlaygroundRequestOptions = {
-	prompt: string;
-	systemPrompt: string;
-	stream: boolean;
-	files: File[];
-	historyJson: string;
-	appendPromptAsUserMessage: boolean;
-	onTextDelta?: (delta: string) => void;
-	onTimelineEvent?: (event: AgentTimelineItem) => void;
-	requestApproval?: (
-		request: PlaygroundApprovalRequest,
-	) => Promise<PlaygroundApprovalDecision>;
-};
-
-export type RunPlaygroundRequestResult = {
-	finalResponse: FinalResponse;
-	output: string;
-};
-
-const DEFAULT_LOCAL_MACHINE_BASE_URL = "http://localhost:3000";
-
-function nextTimelineId(): string {
-	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-		return crypto.randomUUID();
-	}
-	return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function formatTrace(step: string, detail?: string): string {
+	const now = new Date().toISOString();
+	return detail ? `[${now}] ${step}: ${detail}` : `[${now}] ${step}`;
 }
 
 /**
- * Resolves the machine API base URL for the playground.
- * In the browser, defaults to the current origin so requests go through the Vite
- * dev proxy (`/api` → `http://localhost:3000`) and avoid cross-origin CORS failures.
- * Override with `VITE_MACHINE_BASE_URL` when pointing at a remote deployment.
+ * This returns true when the URL host is WorkOS AuthKit’s browser-inaccessible API host (no CORS for SPAs).
+ */
+function isAuthKitAppHost(value: string): boolean {
+	try {
+		return new URL(value).hostname.endsWith(".authkit.app");
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * This resolves the machine API base URL for chat completions.
+ * `VITE_MACHINE_BASE_URL` / `VITE_WORKOS_TOKEN_ENDPOINT` often copy the AuthKit app URL; that host cannot be called from the browser, so we use the page origin and the Vite `/api` proxy to `apps/web` instead.
+ * When unset in dev, uses the current page origin for the same reason.
  */
 function resolvePlaygroundBaseUrl(): string {
-	const fromEnv = import.meta.env.VITE_MACHINE_BASE_URL?.trim();
-	if (fromEnv) {
-		return fromEnv;
+	const explicit =
+		import.meta.env.VITE_MACHINE_BASE_URL?.trim() ||
+		import.meta.env.VITE_WORKOS_TOKEN_ENDPOINT?.trim() ||
+		"";
+
+	if (typeof globalThis.window !== "undefined") {
+		if (!explicit || isAuthKitAppHost(explicit)) {
+			if (explicit && isAuthKitAppHost(explicit)) {
+				console.warn(
+					"[playground] Machine base URL points at *.authkit.app, which blocks browser CORS. Using the page origin; ensure Vite proxies /api to apps/web (see vite.config.ts).",
+				);
+			}
+			return globalThis.window.location.origin;
+		}
+		return explicit;
 	}
 
-	if (typeof window !== "undefined" && window.location.origin) {
-		return window.location.origin;
+	if (explicit && !isAuthKitAppHost(explicit)) {
+		return explicit;
 	}
 
-	return DEFAULT_LOCAL_MACHINE_BASE_URL;
-}
-
-/**
- * Reads playground env and returns config for `create()`.
- * Returns `envError` listing any missing required variables (local testing only).
- */
-export function getPlaygroundConfig(): PlaygroundConfig {
-	const baseUrl = resolvePlaygroundBaseUrl();
-	const accessToken = import.meta.env.VITE_MACHINE_ACCESS_TOKEN?.trim() ?? "";
-	const refreshToken = import.meta.env.VITE_MACHINE_REFRESH_TOKEN?.trim() ?? "";
-	const clientId = import.meta.env.VITE_MACHINE_CLIENT_ID?.trim() ?? "";
-	const clientSecret = import.meta.env.VITE_MACHINE_CLIENT_SECRET?.trim() ?? "";
-
-	const missing = (
-		[
-			["VITE_MACHINE_ACCESS_TOKEN", accessToken],
-			["VITE_MACHINE_REFRESH_TOKEN", refreshToken],
-			["VITE_MACHINE_CLIENT_ID", clientId],
-			["VITE_MACHINE_CLIENT_SECRET", clientSecret],
-		] as const
-	)
-		.filter(([, value]) => !value)
-		.map(([name]) => name);
-
-	const envError =
-		missing.length > 0
-			? `Missing required env in apps/playground/src/.env: ${missing.join(", ")}. Optional: VITE_MACHINE_BASE_URL (otherwise the app uses the current origin and the Vite proxy to ${DEFAULT_LOCAL_MACHINE_BASE_URL}).`
-			: "";
-
-	return {
-		baseUrl,
-		accessToken,
-		refreshToken,
-		clientId,
-		clientSecret,
-		envError,
-	};
-}
-
-export function stringifyJson(value: unknown): string {
-	return JSON.stringify(value, null, 2);
-}
-
-/**
- * This builds a readable JSON preview of the request the playground will send (no file base64).
- */
-export function getPlaygroundRequestPreview(options: {
-	systemPrompt: string;
-	prompt: string;
-	files: File[];
-	historyJson: string;
-	appendPromptAsUserMessage: boolean;
-}): string {
-	let history: unknown;
-	try {
-		history = JSON.parse(options.historyJson) as unknown;
-	} catch {
-		history = "(invalid JSON)";
-	}
-
-	return stringifyJson({
-		provider: "openai-codex",
-		model: "gpt-5.4",
-		system: options.systemPrompt,
-		stream: "(chosen when you run)",
-		temperature: 0.2,
-		maxRetries: 2,
-		history,
-		appendPromptAsUserMessage: options.appendPromptAsUserMessage,
-		prompt: options.prompt,
-		attachments: options.files.map((file) => ({
-			name: file.name,
-			type: file.type,
-			size: file.size,
-		})),
-	});
-}
-
-export function getDisplayText(response: FinalResponse): string {
-	if (typeof response.text === "string" && response.text.length > 0) {
-		return response.text;
-	}
-
-	if (response.object !== undefined) {
-		return stringifyJson(response.object);
+	if (import.meta.env.DEV) {
+		return "http://localhost:5173";
 	}
 
 	return "";
 }
 
-export function maskToken(token: string): string {
-	if (token.length <= 8) {
-		return "configured";
-	}
-
-	return `${token.slice(0, 4)}...${token.slice(-4)}`;
-}
-
 /**
- * This reads a browser file and returns the base64 payload without the data URL prefix.
+ * This reads and validates the env vars we need to create the playground client.
  */
-async function readFileAsBase64(file: File): Promise<string> {
-	const dataUrl = await new Promise<string>((resolve, reject) => {
-		const reader = new FileReader();
+function getPlaygroundClientConfig(): PlaygroundClientConfigResult {
+	const accessToken = import.meta.env.VITE_MACHINE_ACCESS_TOKEN?.trim() ?? "";
+	const refreshToken = import.meta.env.VITE_MACHINE_REFRESH_TOKEN?.trim() ?? "";
+	const clientId = import.meta.env.VITE_MACHINE_CLIENT_ID?.trim() ?? "";
+	const clientSecret = import.meta.env.VITE_MACHINE_CLIENT_SECRET?.trim() ?? "";
+	const baseUrl = resolvePlaygroundBaseUrl();
 
-		reader.onload = () => {
-			if (typeof reader.result !== "string") {
-				reject(new Error(`Could not read ${file.name} as a data URL.`));
-				return;
-			}
+	const missing: string[] = [];
 
-			resolve(reader.result);
-		};
-
-		reader.onerror = () => {
-			reject(reader.error ?? new Error(`Could not read ${file.name}.`));
-		};
-
-		reader.readAsDataURL(file);
-	});
-
-	const commaIndex = dataUrl.indexOf(",");
-	if (commaIndex === -1) {
-		throw new Error(`Could not parse the encoded content for ${file.name}.`);
+	if (!accessToken) {
+		missing.push("VITE_MACHINE_ACCESS_TOKEN");
 	}
 
-	return dataUrl.slice(commaIndex + 1);
-}
-
-/**
- * This maps a browser file into the attachment kind we use in the unified request.
- */
-function getAttachmentKind(file: File): AttachmentContentType["kind"] {
-	if (file.type.startsWith("image/")) {
-		return "image";
+	if (!refreshToken) {
+		missing.push("VITE_MACHINE_REFRESH_TOKEN");
 	}
 
-	if (file.type.startsWith("audio/")) {
-		return "audio";
+	if (!clientId) {
+		missing.push("VITE_MACHINE_CLIENT_ID");
 	}
 
-	if (file.type.startsWith("video/")) {
-		return "video";
+	if (!clientSecret) {
+		missing.push("VITE_MACHINE_CLIENT_SECRET");
 	}
 
-	return "document";
-}
-
-/**
- * This turns browser files into unified attachment content parts for the request.
- */
-async function createAttachmentContents(
-	files: File[],
-): Promise<AttachmentContentType[]> {
-	return Promise.all(
-		files.map(async (file) => ({
-			type: "attachment",
-			kind: getAttachmentKind(file),
-			mimetype: file.type || "application/octet-stream",
-			filename: file.name,
-			source: {
-				type: "base64",
-				data: await readFileAsBase64(file),
-			},
-		})),
-	);
-}
-
-function parseHistoryMessages(json: string): MessageType[] {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(json) as unknown;
-	} catch {
-		throw new Error("History JSON must be valid JSON.");
+	if (!baseUrl) {
+		missing.push("VITE_MACHINE_BASE_URL (or VITE_WORKOS_TOKEN _ENDPOINT)");
 	}
 
-	if (!Array.isArray(parsed)) {
-		throw new Error("History JSON must be a JSON array of messages.");
-	}
-
-	return parsed as MessageType[];
-}
-
-async function consumeTextStream(
-	stream: ReadableStream<string>,
-	onChunk: (delta: string) => void,
-): Promise<void> {
-	const reader = stream.getReader();
-
-	try {
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) {
-				break;
-			}
-
-			onChunk(value);
-		}
-	} finally {
-		reader.releaseLock();
-	}
-}
-
-export async function runPlaygroundRequest(
-	options: RunPlaygroundRequestOptions,
-): Promise<RunPlaygroundRequestResult> {
-	const {
-		prompt,
-		systemPrompt,
-		stream,
-		files,
-		historyJson,
-		appendPromptAsUserMessage,
-		onTextDelta,
-		onTimelineEvent,
-	} = options;
-
-	const emit = (event: Omit<AgentTimelineItem, "id">) => {
-		onTimelineEvent?.({ ...event, id: nextTimelineId() });
-	};
-
-	const config = getPlaygroundConfig();
-
-	if (config.envError) {
-		throw new Error(config.envError);
-	}
-
-	emit({ kind: "run", title: "Run started" });
-
-	const historyMessages = parseHistoryMessages(historyJson);
-	const attachments = await createAttachmentContents(files);
-	const trimmedPrompt = prompt.trim();
-
-	const messageContent:
-		| string
-		| readonly (
-				| AttachmentContentType
-				| { readonly type: "text"; readonly text: string }
-		  )[] =
-		attachments.length === 0
-			? trimmedPrompt
-			: [
-					...(trimmedPrompt
-						? ([{ type: "text" as const, text: trimmedPrompt }] as const)
-						: []),
-					...attachments,
-				];
-
-	const messages: MessageType[] = [...historyMessages];
-
-	if (appendPromptAsUserMessage && (trimmedPrompt || attachments.length > 0)) {
-		messages.push({
-			role: "user",
-			content: messageContent,
-		});
-	}
-
-	if (messages.length === 0) {
-		throw new Error(
-			"Add at least one message: enable “Append message as last user turn” or put messages in History JSON.",
-		);
-	}
-
-	const request = {
-		provider: "openai-codex",
-		model: "gpt-5.4",
-		system: systemPrompt,
-		stream,
-		temperature: 0.2,
-		maxRetries: 2,
-		messages,
-	} satisfies AppRequestShapeType;
-
-	const client = create({
-		accessToken: config.accessToken,
-		refreshToken: config.refreshToken,
-		clientId: config.clientId,
-		clientSecret: config.clientSecret,
-		baseUrl: config.baseUrl,
-	});
-
-	emit({ kind: "model", title: "Calling model", detail: request.model });
-
-	const result = await client.generate(request);
-
-	if (stream) {
-		if (!result.stream) {
-			throw new Error("Expected a streaming response.");
-		}
-
-		if (!result.textStream) {
-			throw new Error("Streaming response did not provide a text stream.");
-		}
-
-		await consumeTextStream(result.textStream, (delta) => {
-			onTextDelta?.(delta);
-		});
-
-		const finalResponse = await result.final();
-		emit({
-			kind: "final",
-			title: "Completed",
-			detail: finalResponse.status,
-		});
+	if (missing.length > 0) {
 		return {
-			finalResponse,
-			output: getDisplayText(finalResponse),
+			ok: false,
+			error: `Playground client is not configured. Missing: ${missing.join(", ")}.`,
 		};
 	}
 
-	if (result.stream) {
-		throw new Error("Expected a batch response.");
+	return {
+		ok: true,
+		options: {
+			accessToken,
+			refreshToken,
+			clientId,
+			clientSecret,
+			baseUrl,
+		},
+	};
+}
+
+const DEFAULT_MODEL: appRequestShape["model"] = "gpt-5.4";
+const DEFAULT_SYSTEM_PROMPT = "You are a really helpful AI assistant.";
+const DEFAULT_TEMPERATURE = 0.7;
+const DEFAULT_MAX_RETRIES = 2;
+
+/**
+ * This is the only input we expect from the UI.
+ */
+export type PlaygroundRunInput = {
+	latestMessage: string;
+	model?: appRequestShape["model"];
+};
+
+/**
+ * This is the rich callback set for wiring stream events to the UI.
+ */
+export type PlaygroundRequestHandlers = {
+	onTrace?: (message: string) => void;
+	onEvent?: (event: UnifiedStreamEventPayload) => void;
+	onStart?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "start" }>,
+	) => void;
+	onTextStart?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "text_start" }>,
+	) => void;
+	onTextDelta?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "text_delta" }>,
+	) => void;
+	onTextEnd?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "text_end" }>,
+	) => void;
+	onThinkingStart?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "thinking_start" }>,
+	) => void;
+	onThinkingDelta?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "thinking_delta" }>,
+	) => void;
+	onThinkingEnd?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "thinking_end" }>,
+	) => void;
+	onToolCallStart?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "toolcall_start" }>,
+	) => void;
+	onToolCallDelta?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "toolcall_delta" }>,
+	) => void;
+	onToolCallEnd?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "toolcall_end" }>,
+	) => void;
+	onApprovalRequired?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "approval_required" }>,
+	) => void;
+	onDone?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "done" }>,
+	) => void;
+	onError?: (
+		event: Extract<UnifiedStreamEventPayload, { type: "error" }>,
+	) => void;
+};
+
+export const sum: ToolDefinitionType = {
+	name: "sum",
+	description: "the purpose of this tool is too add two numbers",
+	requiresApproval: false,
+	retrySafe: true,
+	inputSchema: z.object({
+		a: z.number(),
+		b: z.number(),
+	}),
+	execute: async ({ a, b }: { a: number; b: number }) => {
+		return a + b;
+	},
+};
+/**
+ * This builds the request here and forwards rich package stream events to UI callbacks.
+ */
+export async function runPlaygroundRequest(
+	input: PlaygroundRunInput,
+	handlers: PlaygroundRequestHandlers = {},
+): Promise<UnifiedResponseType> {
+	const emitTrace = (step: string, detail?: string) => {
+		const message = formatTrace(step, detail);
+		handlers.onTrace?.(message);
+		console.debug(message);
+	};
+
+	emitTrace("run.start", `model=${input.model ?? DEFAULT_MODEL}`);
+
+	const config = getPlaygroundClientConfig();
+	emitTrace(
+		"config.read",
+		`hasAccessToken=${config.ok || !config.error.includes("VITE_MACHINE_ACCESS_TOKEN")}`,
+	);
+
+	if (!config.ok) {
+		emitTrace("config.invalid", config.error);
+		throw new Error(config.error);
 	}
 
-	const finalResponse = result.response;
-	emit({
-		kind: "final",
-		title: "Completed",
-		detail: finalResponse.status,
-	});
-	return {
-		finalResponse,
-		output: getDisplayText(finalResponse),
+	const nextBaseUrl = config.options.baseUrl;
+	if (!haxClient || cachedClientBaseUrl !== nextBaseUrl) {
+		emitTrace(
+			"client.create",
+			cachedClientBaseUrl !== nextBaseUrl && haxClient
+				? "base URL changed; recreating @hax/ai client"
+				: "creating new @hax/ai client",
+		);
+		haxClient = create(config.options);
+		cachedClientBaseUrl = nextBaseUrl;
+	} else {
+		emitTrace("client.reuse", "reusing cached @hax/ai client");
+	}
+
+	const hax = haxClient;
+
+	const request: appRequestShape = {
+		provider: "openai-codex",
+		model: input.model ?? DEFAULT_MODEL,
+		system: DEFAULT_SYSTEM_PROMPT,
+		stream: true,
+		temperature: DEFAULT_TEMPERATURE,
+		maxRetries: DEFAULT_MAX_RETRIES,
+		tools: [sum],
+		messages: [
+			{
+				role: "user",
+				content: input.latestMessage,
+				timestamp: Date.now(),
+			},
+		],
 	};
+
+	emitTrace(
+		"request.built",
+		`messages=${request.messages.length}, tools=${request.tools?.length ?? 0}`,
+	);
+
+	emitTrace("request.send", "calling hax.generate");
+	const result = await hax.generate(request);
+	emitTrace("response.received", `stream=${String(result.stream)}`);
+
+	if (!result.stream) {
+		emitTrace("response.batch", "non-stream response path");
+		const doneEvent = {
+			type: "done",
+			reason: "stop",
+			message: result.response,
+		} as Extract<UnifiedStreamEventPayload, { type: "done" }>;
+		handlers.onDone?.(doneEvent);
+		emitTrace("run.done", "batch response returned");
+		return result.response;
+	}
+
+	emitTrace("response.stream.start", "consuming stream events");
+	for await (const event of result.events) {
+		emitTrace("response.stream.event", event.type);
+		handlers.onEvent?.(event);
+
+		switch (event.type) {
+			case "start":
+				{
+					handlers.onStart?.(event);
+					console.log(event.partial);
+				}
+
+				break;
+			case "text_start":
+				{
+					handlers.onTextStart?.(event);
+					console.log(event.partial);
+				}
+				break;
+			case "text_delta":
+				emitTrace("response.stream.text_delta", `chars=${event.delta.length}`);
+				handlers.onTextDelta?.(event);
+				console.log(event.delta);
+				break;
+			case "text_end":
+				handlers.onTextEnd?.(event);
+				console.log(event.content);
+				break;
+			case "thinking_start":
+				handlers.onThinkingStart?.(event);
+				console.log(event.partial);
+				break;
+			case "thinking_delta":
+				handlers.onThinkingDelta?.(event);
+				console.log(event.delta);
+				break;
+			case "thinking_end":
+				handlers.onThinkingEnd?.(event);
+				console.log(event.content);
+
+				break;
+			case "toolcall_start":
+				handlers.onToolCallStart?.(event);
+				break;
+			case "toolcall_delta":
+				handlers.onToolCallDelta?.(event);
+				break;
+			case "toolcall_end":
+				handlers.onToolCallEnd?.(event);
+				break;
+			case "approval_required":
+				handlers.onApprovalRequired?.(event);
+				break;
+			case "done":
+				handlers.onDone?.(event);
+				emitTrace("run.done", "stream done event received");
+				return event.message;
+			case "error":
+				handlers.onError?.(event);
+				emitTrace("run.error", "stream error event received");
+				return event.error;
+			default:
+				break;
+		}
+	}
+
+	emitTrace("response.stream.final", "awaiting final response snapshot");
+	const final = await result.final();
+	emitTrace("run.done", "returned result.final()");
+	return final;
 }
