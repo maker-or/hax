@@ -1,12 +1,7 @@
 "use client";
 
 import { Authenticated, useAction } from "convex/react";
-import {
-	AlertTriangle,
-	ArrowLeft,
-	CornerDownLeft,
-	Loader2,
-} from "lucide-react";
+import { AlertTriangle, CornerDownLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -131,10 +126,9 @@ function CreateAppView() {
 				<div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-8">
 					<GsapPressLink
 						href="/console/apps"
-						className={cx.linkBack}
+						className={`${cx.linkBack} cursor-pointer`}
 						scale={0.99}
 					>
-						<ArrowLeft className="size-4 shrink-0" />
 						<span>Apps</span>
 					</GsapPressLink>
 					<p className="min-w-0 text-base font-semibold tracking-tight text-foreground">
@@ -175,8 +169,9 @@ function CreateAppView() {
 								<div className="mt-3 space-y-2">
 									{domains.map((d, i) => (
 										<div
-											key={`domain-${i}`}
 											className="flex items-center gap-3"
+											// biome-ignore lint/suspicious/noArrayIndexKey: domain rows are index-ordered editable list
+											key={`domain-${i}`}
 										>
 											<input
 												type="text"
@@ -270,13 +265,16 @@ function CreateAppView() {
 					)}
 
 					<div className="mt-auto flex shrink-0 items-center justify-end gap-3 border-border/50 border-t bg-background/95 px-8 py-4 backdrop-blur-sm supports-[backdrop-filter]:bg-background/80 sm:px-10">
-						<Link href="/console/apps" className={cx.secondaryBtn}>
+						<Link
+							href="/console/apps"
+							className={`${cx.secondaryBtn} cursor-pointer`}
+						>
 							Cancel
 						</Link>
 						<button
 							type="submit"
 							disabled={isCreating}
-							className={cx.primaryBtn}
+							className={`${cx.primaryBtn} cursor-pointer disabled:cursor-not-allowed`}
 						>
 							{isCreating ? (
 								<>

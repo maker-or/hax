@@ -4,6 +4,7 @@ Rule
 - Alway use bun not npm or pnpm
 - When writing the plan to edit or change file , i suggest you to first read those particualr files so that you actaully know what is the current state they are in so you can plan thing better , instead of assuming thing
 - When asked about editing a file for UI change always use the .agents/skills/frontend-design and .agents/skills/emil-design-eng
+- When every in the UI any thing clickable must have cursor-pointer
 
 <!-- btca-cli-start -->
 **Never run this CLI command in the sandbox**

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono, JetBrains_Mono , Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -17,6 +17,10 @@ const geistMono = Geist_Mono({
 	subsets: ["latin"],
 });
 
+const playfair = Playfair_Display({
+  variable: "--font-playfair",
+  subsets: ["latin"],
+});
 export const metadata: Metadata = {
 	title: "API Key Management",
 	description: "Manage your API keys",
@@ -33,7 +37,7 @@ export default function RootLayout({
 	return (
 		<html lang="en" className={cn("dark", "font-mono", jetbrainsMono.variable)}>
 			<body
-				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+				className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} antialiased`}
 			>
 				<ConvexClientProvider>
 					<TooltipProvider>{children}</TooltipProvider>

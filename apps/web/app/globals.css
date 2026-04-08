@@ -140,6 +140,16 @@ body {
     @apply font-mono;
   }
 }
+::selection {
+  background-color: #423747;
+  color: #C9A9DD;
+}
+
+::-moz-selection {
+  background-color: #423747;
+  color: #C9A9DD;
+}
+
 
 /* Rare “copy secret” panel entrance — opacity + nudge + scale from 0.98 (not 0) */
 @keyframes client-secret-reveal {

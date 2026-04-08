@@ -1,7 +1,7 @@
 "use client";
 
 import { Authenticated, useQuery } from "convex/react";
-import { ArrowLeft, Check, Copy, Settings } from "lucide-react";
+import { Check, Copy, Settings } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../../../../../convex/_generated/api";
@@ -67,20 +67,12 @@ function AppOverview() {
 		return (
 			<div className={cx.page}>
 				<Header appName="…" appId={appId} />
-				<main className="grid min-h-0 flex-1 grid-cols-2 gap-0 px-8 py-8">
-					<div className="min-h-0 space-y-3 overflow-hidden">
-						{[0, 1, 2].map((i) => (
+				<main className="min-h-0 flex-1 overflow-y-auto px-8 py-8 sm:px-10">
+					<div className="w-full space-y-3">
+						{[0, 1, 2, 3, 4].map((i) => (
 							<div
 								key={i}
-								className="h-16 animate-pulse rounded-none bg-muted/40"
-							/>
-						))}
-					</div>
-					<div className="min-h-0 space-y-3 overflow-hidden">
-						{[0, 1].map((i) => (
-							<div
-								key={i}
-								className="h-16 animate-pulse rounded-none bg-muted/40"
+								className="h-16 w-full animate-pulse rounded-none bg-muted/40"
 							/>
 						))}
 					</div>
@@ -118,18 +110,17 @@ function AppOverview() {
 				createdAt={typedApp.createdAt}
 			/>
 
-			<main className="grid min-h-0 flex-1 grid-cols-2">
-				<div className="min-h-0 overflow-y-auto px-8 py-8 sm:px-10">
-					<section>
+			<main className="min-h-0 flex-1 overflow-y-auto">
+				<div className="w-full space-y-12 px-8 py-8 sm:px-10">
+					<section className="w-full">
 						<h2 className="mb-4 text-sm font-semibold text-foreground">
 							Quick start
 						</h2>
 						<div className="divide-y divide-border/60">
 							<Step number={1} title="Get your credentials">
 								<p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-									Your Client ID is in the right column. Create a client secret
-									there when you need to exchange codes — keep secrets
-									server-side only.
+									Your Client ID is below. Create a client secret when you need
+									to exchange codes — keep secrets server-side only.
 								</p>
 							</Step>
 
@@ -185,10 +176,8 @@ grant_type=authorization_code
 							</Step>
 						</div>
 					</section>
-				</div>
 
-				<div className="min-h-0 space-y-10 overflow-y-auto px-8 py-8 sm:px-10">
-					<section>
+					<section className="w-full">
 						<h2 className="mb-4 text-sm font-semibold text-foreground">
 							Client ID
 						</h2>
@@ -201,7 +190,7 @@ grant_type=authorization_code
 								onClick={() =>
 									copyToClipboard(typedApp.workosClientId, "client-id")
 								}
-								className={cx.iconCopyBtn}
+								className={`${cx.iconCopyBtn} cursor-pointer`}
 							>
 								{copied === "client-id" ? (
 									<Check className="size-4 text-emerald-500" />
@@ -214,7 +203,7 @@ grant_type=authorization_code
 
 					<ClientSecretsSection appId={appId} isAdmin={isAdmin} />
 
-					<section>
+					<section className="w-full">
 						<h2 className="mb-4 text-sm font-semibold text-foreground">
 							Allowed domains
 						</h2>
@@ -223,7 +212,7 @@ grant_type=authorization_code
 								No domains configured. Add origins where your frontend runs in{" "}
 								<GsapPressLink
 									href={`/console/apps/${appId}/settings`}
-									className={cx.linkPrimary}
+									className={`${cx.linkPrimary} cursor-pointer`}
 									scale={0.99}
 								>
 									settings
@@ -247,7 +236,7 @@ grant_type=authorization_code
 						)}
 						<GsapPressLink
 							href={`/console/apps/${appId}/settings`}
-							className={`mt-3 ${cx.linkInline}`}
+							className={`mt-3 cursor-pointer ${cx.linkInline}`}
 							scale={0.97}
 						>
 							<Settings className="size-3.5" />
@@ -255,7 +244,7 @@ grant_type=authorization_code
 						</GsapPressLink>
 					</section>
 
-					<section>
+					<section className="w-full">
 						<h2 className="mb-4 text-sm font-semibold text-foreground">
 							Redirect URIs
 						</h2>
@@ -281,7 +270,7 @@ grant_type=authorization_code
 						</div>
 						<GsapPressLink
 							href={`/console/apps/${appId}/settings`}
-							className={`mt-3 ${cx.linkInline}`}
+							className={`mt-3 cursor-pointer ${cx.linkInline}`}
 							scale={0.97}
 						>
 							<Settings className="size-3.5" />
@@ -290,15 +279,6 @@ grant_type=authorization_code
 					</section>
 				</div>
 			</main>
-
-			<footer className="flex items-center justify-between border-t border-border/50 bg-card/30 px-8 py-4 backdrop-blur-sm">
-				<span className="text-xs text-muted-foreground">
-					Pro gateway · OAuth apps
-				</span>
-				<span className="font-mono text-xs text-muted-foreground">
-					{new Date().toISOString().slice(0, 10)}
-				</span>
-			</footer>
 		</div>
 	);
 }
@@ -327,10 +307,9 @@ function Header({
 				<div className="flex min-w-0 flex-1 items-center gap-4">
 					<GsapPressLink
 						href="/console/apps"
-						className={cx.linkBack}
+						className={`${cx.linkBack} cursor-pointer`}
 						scale={0.99}
 					>
-						<ArrowLeft className="size-4" />
 						<span>Apps</span>
 					</GsapPressLink>
 					<div className="h-4 w-px shrink-0 bg-border" />
@@ -348,7 +327,7 @@ function Header({
 				<div className="flex shrink-0 items-center gap-3">
 					<GsapPressLink
 						href={`/console/apps/${appId}/settings`}
-						className={cx.navPill}
+						className={`${cx.navPill} cursor-pointer`}
 						scale={0.97}
 					>
 						Settings
@@ -398,7 +377,7 @@ function CodeBlock({
 			<button
 				type="button"
 				onClick={() => onCopy(code, copyKey)}
-				className={cx.codeCopyBtn}
+				className={`${cx.codeCopyBtn} cursor-pointer`}
 			>
 				{copied === copyKey ? (
 					<Check className="size-3.5 text-emerald-500" />

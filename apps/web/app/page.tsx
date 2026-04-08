@@ -6,6 +6,8 @@ import { ArrowRight, Code, Key, Shield, Zap } from "lucide-react";
 import Link from "next/link";
 import { AuthenticatedLayout } from "@/components/authenticated-layout";
 import { Button } from "@/components/ui/button";
+import LandingPage from "@/components/landing";
+
 
 export default function Home() {
 	return (
@@ -167,7 +169,7 @@ function DashboardHome() {
 	);
 }
 
-function LandingPage() {
+function Lon() {
 	return (
 		<div className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
 			<div className="hidden lg:flex flex-col justify-center items-center bg-sidebar p-12">

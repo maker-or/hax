@@ -1,12 +1,7 @@
 "use client";
 
 import { Authenticated, useAction, useQuery } from "convex/react";
-import {
-	AlertTriangle,
-	ArrowLeft,
-	CornerDownLeft,
-	Loader2,
-} from "lucide-react";
+import { AlertTriangle, CornerDownLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -423,10 +418,17 @@ function AppSettingsView() {
 					)}
 
 					<div className="mt-auto flex shrink-0 items-center justify-end gap-3 border-border/50 border-t bg-background/95 px-8 py-4 backdrop-blur-sm supports-[backdrop-filter]:bg-background/80 sm:px-10">
-						<Link href={`/console/apps/${appId}`} className={cx.secondaryBtn}>
+						<Link
+							href={`/console/apps/${appId}`}
+							className={`${cx.secondaryBtn} cursor-pointer`}
+						>
 							Cancel
 						</Link>
-						<button type="submit" disabled={isSaving} className={cx.primaryBtn}>
+						<button
+							type="submit"
+							disabled={isSaving}
+							className={`${cx.primaryBtn} cursor-pointer disabled:cursor-not-allowed`}
+						>
 							{isSaving ? (
 								<>
 									<Loader2 className="size-4 animate-spin" />
@@ -460,10 +462,9 @@ function SettingsHeader({
 			<div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-8">
 				<GsapPressLink
 					href={`/console/apps/${appId}`}
-					className={cx.linkBack}
+					className={`${cx.linkBack} cursor-pointer`}
 					scale={0.99}
 				>
-					<ArrowLeft className="size-4 shrink-0" />
 					<span className="max-w-[10rem] truncate">{appName}</span>
 				</GsapPressLink>
 				<p className="min-w-0 text-base font-semibold tracking-tight text-foreground">

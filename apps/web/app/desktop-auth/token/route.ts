@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { isLikelyConvexConnectivityError } from "@/lib/convex-connectivity";
 import { getWorkOS } from "@workos-inc/authkit-nextjs";
 import { fetchMutation, fetchQuery } from "convex/nextjs";
+import type { FunctionReturnType } from "convex/server";
 import { type NextRequest, NextResponse } from "next/server";
 import { api } from "../../../../../convex/_generated/api";
 import { decrypt } from "../../../../../convex/lib/encryption";
@@ -58,13 +60,32 @@ export async function POST(request: NextRequest) {
 	}
 
 	const secretHash = hashDesktopSecret(body.desktopSecret);
-	const desktopSession = await fetchQuery(
-		api.users.getDesktopSessionForTokenBroker,
-		{
-			sessionId: body.desktopSessionId,
-			secretHash,
-		},
-	);
+
+	let desktopSession: FunctionReturnType<
+		typeof api.users.getDesktopSessionForTokenBroker
+	>;
+	try {
+		desktopSession = await fetchQuery(
+			api.users.getDesktopSessionForTokenBroker,
+			{
+				sessionId: body.desktopSessionId,
+				secretHash,
+			},
+		);
+	} catch (error) {
+		if (isLikelyConvexConnectivityError(error)) {
+			console.error("[desktop-auth/token] Convex unreachable:", error);
+			return NextResponse.json(
+				{
+					error: "Could not reach Convex.",
+					detail:
+						"Connection timed out or failed. Check network, VPN, and firewall; confirm NEXT_PUBLIC_CONVEX_URL matches your deployment.",
+				},
+				{ status: 503 },
+			);
+		}
+		throw error;
+	}
 
 	if (!desktopSession) {
 		return NextResponse.json(
@@ -99,6 +120,17 @@ export async function POST(request: NextRequest) {
 		});
 	} catch (error) {
 		console.error("[desktop-auth/token] refresh failed:", error);
+
+		if (isLikelyConvexConnectivityError(error)) {
+			return NextResponse.json(
+				{
+					error: "Could not reach Convex.",
+					detail:
+						"Connection timed out while updating the session. Check network and NEXT_PUBLIC_CONVEX_URL.",
+				},
+				{ status: 503 },
+			);
+		}
 
 		if (isEndedDesktopSessionError(error)) {
 			return NextResponse.json(
