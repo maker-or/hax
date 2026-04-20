@@ -15,13 +15,6 @@ export function getHaxConfigDir(): string {
 }
 
 /**
- * Path to non-secret Hax session metadata (tokens expiry, user object).
- */
-export function getHaxAuthJsonPath(): string {
-	return path.join(getHaxConfigDir(), "hax-auth.json");
-}
-
-/**
  * Path to the local bridge config file.
  */
 export function getBridgeConfigJsonPath(): string {

@@ -1,90 +1,382 @@
-import { exec, spawn } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import inquirer from "inquirer";
 import ora from "ora";
 
-const execAsync = promisify(exec);
+/**
+ * This is one provider option shown in setup prompt.
+ */
+type ProviderId = "chatgpt-codex" | "anthropic-claude-code";
 
 /**
- * Checks if a command exists in the system PATH.
- * @param command - The command to check (e.g. 'codex' or 'cloudcode')
- * @returns boolean indicating if command exists
+ * This is runtime state for one provider on current machine.
  */
-async function commandExists(command: string): Promise<boolean> {
-	try {
-		await execAsync(`command -v ${command}`);
-		return true;
-	} catch {
-		return false;
-	}
-}
+type ProviderState = {
+	authenticated: boolean;
+	installed: boolean;
+};
 
 /**
- * Runs a shell command and streams output to terminal.
- * @param command - The command to run
- * @param args - Arguments array
- * @returns Promise that resolves when command exits with code 0
+ * This is shape of a command execution result.
  */
-function runCommandInteractive(command: string, args: string[]): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const child = spawn(command, args, { stdio: "inherit", shell: true });
+type CommandResult = {
+	code: number | null;
+	errorCode?: string;
+	ok: boolean;
+	stderr: string;
+	stdout: string;
+};
+
+/**
+ * This is setup result for one provider.
+ */
+type ProviderSetupResult = {
+	error?: string;
+	ok: boolean;
+	provider: ProviderId;
+};
+
+/**
+ * This runs a command and captures stdout/stderr without opening interactive TTY.
+ */
+async function runCommand(
+	command: string,
+	args: string[],
+): Promise<CommandResult> {
+	return new Promise((resolve) => {
+		const child = spawn(command, args, {
+			shell: false,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+
+		let stdout = "";
+		let stderr = "";
+		let errorCode: string | undefined;
+
+		child.stdout.on("data", (chunk: Buffer | string) => {
+			stdout += chunk.toString();
+		});
+		child.stderr.on("data", (chunk: Buffer | string) => {
+			stderr += chunk.toString();
+		});
+
+		child.on("error", (error: NodeJS.ErrnoException) => {
+			errorCode = error.code;
+		});
+
 		child.on("close", (code) => {
-			if (code === 0) {
-				resolve();
-			} else {
-				reject(new Error(`Command ${command} failed with exit code ${code}`));
-			}
+			resolve({
+				code,
+				errorCode,
+				ok: code === 0,
+				stderr: stderr.trim(),
+				stdout: stdout.trim(),
+			});
 		});
 	});
 }
 
 /**
- * Prompts the user to install a harness if none are found.
- * Installs the chosen harness and runs its authentication flow.
+ * This runs a command in interactive mode so user can complete login flows.
+ */
+function runInteractive(command: string, args: string[]): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(command, args, {
+			shell: false,
+			stdio: "inherit",
+		});
+
+		child.on("error", (error) => {
+			reject(error);
+		});
+
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolve();
+				return;
+			}
+			reject(new Error(`Command ${command} failed with exit code ${code}`));
+		});
+	});
+}
+
+/**
+ * This runs a shell command in interactive mode.
+ */
+function runInteractiveShell(command: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(command, {
+			shell: true,
+			stdio: "inherit",
+		});
+
+		child.on("error", (error) => reject(error));
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolve();
+				return;
+			}
+			reject(new Error(`Shell command failed with exit code ${code}`));
+		});
+	});
+}
+
+/**
+ * This returns true when command result means binary was not found.
+ */
+function isMissingBinary(result: CommandResult): boolean {
+	return (
+		result.errorCode === "ENOENT" || result.code === 127 || result.code === 9009
+	);
+}
+
+/**
+ * This checks Codex installation and auth state by running `codex login status`.
+ */
+async function getCodexState(): Promise<ProviderState> {
+	const result = await runCommand("codex", ["login", "status"]);
+	if (isMissingBinary(result)) {
+		return { authenticated: false, installed: false };
+	}
+
+	const combined = `${result.stdout}\n${result.stderr}`.toLowerCase();
+	const notLoggedIn =
+		combined.includes("not logged in") ||
+		combined.includes("not authenticated") ||
+		combined.includes("login required");
+
+	return {
+		authenticated: result.ok && !notLoggedIn,
+		installed: true,
+	};
+}
+
+/**
+ * This checks Claude Code installation with `claude -v` and auth with `claude auth status`.
+ */
+async function getClaudeState(): Promise<ProviderState> {
+	const version = await runCommand("claude", ["-v"]);
+	if (isMissingBinary(version)) {
+		return { authenticated: false, installed: false };
+	}
+
+	const status = await runCommand("claude", ["auth", "status"]);
+	const combined = `${status.stdout}\n${status.stderr}`.toLowerCase();
+	const notLoggedIn =
+		combined.includes("not logged in") ||
+		combined.includes("not authenticated") ||
+		combined.includes("login required");
+
+	return {
+		authenticated: status.ok && !notLoggedIn,
+		installed: true,
+	};
+}
+
+/**
+ * This installs Claude Code based on current operating system.
+ */
+async function installClaudeCode(): Promise<void> {
+	if (process.platform !== "win32") {
+		await runInteractiveShell("curl -fsSL https://claude.ai/install.sh | bash");
+		return;
+	}
+
+	try {
+		await runInteractive("powershell", [
+			"-NoProfile",
+			"-ExecutionPolicy",
+			"Bypass",
+			"-Command",
+			"irm https://claude.ai/install.ps1 | iex",
+		]);
+		return;
+	} catch {
+		await runInteractive("cmd.exe", [
+			"/d",
+			"/s",
+			"/c",
+			"curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd",
+		]);
+	}
+}
+
+/**
+ * This installs OpenAI Codex CLI globally.
+ */
+async function installCodex(): Promise<void> {
+	await runInteractive("bun", ["add", "-g", "@openai/codex"]);
+}
+
+/**
+ * This installs chosen provider if missing, then runs login in same session.
+ * It never throws and returns success/failure.
+ */
+async function setupProvider(
+	provider: ProviderId,
+): Promise<ProviderSetupResult> {
+	try {
+		if (provider === "chatgpt-codex") {
+			const before = await getCodexState();
+			if (!before.installed) {
+				const spinner = ora("Installing ChatGPT Codex CLI...").start();
+				try {
+					await installCodex();
+					spinner.succeed("Codex installed.");
+				} catch (error) {
+					spinner.fail("Codex install failed.");
+					throw error;
+				}
+			}
+
+			if (!before.authenticated || !before.installed) {
+				console.log("\nAuthenticate ChatGPT Codex account:");
+				await runInteractive("codex", ["login"]);
+			}
+
+			const after = await getCodexState();
+			if (!after.installed || !after.authenticated) {
+				return {
+					error:
+						"Codex setup incomplete. Install/login did not finish successfully.",
+					ok: false,
+					provider,
+				};
+			}
+
+			return { ok: true, provider };
+		}
+
+		const before = await getClaudeState();
+		if (!before.installed) {
+			const spinner = ora("Installing Anthropic Claude Code CLI...").start();
+			try {
+				await installClaudeCode();
+				spinner.succeed("Claude Code installed.");
+			} catch (error) {
+				spinner.fail("Claude Code install failed.");
+				throw error;
+			}
+		}
+
+		if (!before.authenticated || !before.installed) {
+			console.log("\nAuthenticate Anthropic Claude Code account:");
+			await runInteractive("claude", ["auth", "login"]);
+		}
+
+		const after = await getClaudeState();
+		if (!after.installed || !after.authenticated) {
+			return {
+				error:
+					"Claude Code setup incomplete. Install/login did not finish successfully.",
+				ok: false,
+				provider,
+			};
+		}
+
+		return { ok: true, provider };
+	} catch (error) {
+		return {
+			error: error instanceof Error ? error.message : String(error),
+			ok: false,
+			provider,
+		};
+	}
+}
+
+/**
+ * This asks user which subscriptions to connect and supports multi-select.
+ * Empty selection is allowed so user can skip setup.
+ */
+async function promptProviderSelection(
+	states: Record<ProviderId, ProviderState>,
+): Promise<ProviderId[]> {
+	const codexState = states["chatgpt-codex"];
+	const claudeState = states["anthropic-claude-code"];
+
+	const { providers } = await inquirer.prompt<{
+		providers: ProviderId[];
+	}>([
+		{
+			choices: [
+				{
+					checked: !codexState.installed || !codexState.authenticated,
+					name: `ChatGPT Codex ${
+						codexState.installed
+							? codexState.authenticated
+								? "(ready)"
+								: "(installed, login needed)"
+							: "(not installed)"
+					}`,
+					value: "chatgpt-codex",
+				},
+				{
+					checked: !claudeState.installed || !claudeState.authenticated,
+					name: `Anthropic Claude Code ${
+						claudeState.installed
+							? claudeState.authenticated
+								? "(ready)"
+								: "(installed, login needed)"
+							: "(not installed)"
+					}`,
+					value: "anthropic-claude-code",
+				},
+			],
+			message: "Connect your subscriptions (optional)",
+			name: "providers",
+			type: "checkbox",
+		},
+	]);
+
+	return providers ?? [];
+}
+
+/**
+ * This checks harness install/auth state and offers one-session setup.
+ * Setup is helper only. It never blocks the rest of CLI.
  */
 export async function ensureHarnessInstalled(): Promise<void> {
-	const hasCodex = await commandExists("codex");
-	const hasCloudCode = await commandExists("cloudcode");
+	const states: Record<ProviderId, ProviderState> = {
+		"anthropic-claude-code": await getClaudeState(),
+		"chatgpt-codex": await getCodexState(),
+	};
 
-	if (hasCodex || hasCloudCode) {
+	const allReady = Object.values(states).every(
+		(state) => state.installed && state.authenticated,
+	);
+	if (allReady) {
 		return;
 	}
 
 	console.log(
-		"\nNo AI harness found. Polarish requires either Codex or Cloud Code.",
+		"\nSome providers are not ready. You can skip setup and continue.",
 	);
 
-	const { harness } = await inquirer.prompt([
-		{
-			type: "list",
-			name: "harness",
-			message: "Which harness would you like to install?",
-			choices: [
-				{ name: "Codex", value: "codex" },
-				{ name: "Cloud Code", value: "cloudcode" },
-			],
-		},
-	]);
-
-	const spinner = ora(`Installing ${harness}...`).start();
-
+	let selectedProviders: ProviderId[] = [];
 	try {
-		if (harness === "codex") {
-			// Example install command, replace with actual
-			await execAsync("npm install -g @codex/cli"); // TODO: correct command
-			spinner.succeed("Codex installed successfully.");
-			console.log("\nPlease authenticate with Codex:");
-			await runCommandInteractive("codex", ["login"]);
-		} else {
-			// Example install command, replace with actual
-			await execAsync("npm install -g @cloudcode/cli"); // TODO: correct command
-			spinner.succeed("Cloud Code installed successfully.");
-			console.log("\nPlease authenticate with Cloud Code:");
-			await runCommandInteractive("cloudcode", ["login"]);
-		}
-	} catch (error) {
-		spinner.fail(`Failed to install ${harness}.`);
-		console.error(error);
-		process.exit(1);
+		selectedProviders = await promptProviderSelection(states);
+	} catch {
+		console.log("Skipped provider setup.");
+		return;
+	}
+
+	if (selectedProviders.length === 0) {
+		console.log("Skipped provider setup.");
+		return;
+	}
+
+	const results: ProviderSetupResult[] = [];
+	for (const provider of selectedProviders) {
+		results.push(await setupProvider(provider));
+	}
+
+	const failures = results.filter((result) => !result.ok);
+	if (failures.length === 0) {
+		console.log("\nProvider setup complete.");
+		return;
+	}
+
+	console.log("\nProvider setup finished with warnings:");
+	for (const failure of failures) {
+		console.log(`- ${failure.provider}: ${failure.error ?? "Unknown error"}`);
 	}
 }
