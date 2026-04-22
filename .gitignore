@@ -45,9 +45,6 @@ release/
 .agents
 .cursor
 
-# App workspace
-apps
-
 # Cursor/agent lock files
 skills-lock.json
 

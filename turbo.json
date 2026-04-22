@@ -5,7 +5,7 @@
     "CONVEX_*",
     "NEXT_PUBLIC_*",
     "VERCEL_*",
-    "VITE_*",
+
     "WORKOS_*"
   ],
   "tasks": {
