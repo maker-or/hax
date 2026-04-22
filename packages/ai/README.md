@@ -1,6 +1,13 @@
 # @polarish/ai
 
-Build AI workflows with one TypeScript SDK.
+Polarish is an open-source SDK for building AI workflows where users bring their own AI subscriptions.
+
+It has two packages that work in tandem:
+
+- `@polarish/ai` — a TypeScript SDK to build AI workflows in your app.
+- `@polarish/cli` — a local CLI bridge that helps users connect their AI subscriptions and run those workflows through local provider runtimes.
+
+To deliver the full end-user experience, you typically use both packages together.
 
 This package gives you:
 

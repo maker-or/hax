@@ -1,6 +1,13 @@
 # @polarish/cli
 
-Polarish CLI configures the local bridge that browser apps use to reach vendor runtimes like Codex on your machine.
+Polarish is an open-source SDK for building AI workflows where users bring their own AI subscriptions.
+
+It has two packages that work in tandem:
+
+- `@polarish/ai` — a TypeScript SDK to build AI workflows in your app.
+- `@polarish/cli` — a local CLI bridge that helps users connect their AI subscriptions and run those workflows through local provider runtimes.
+
+To deliver the full end-user experience, you typically use both packages together.
 
 On first run, the CLI checks whether Codex and Claude Code are installed and authenticated. If not, it opens an interactive "Connect your subscriptions" flow to install and log in selected providers in one session.
 
