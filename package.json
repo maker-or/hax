@@ -1,5 +1,5 @@
 {
-  "name": "hax",
+  "name": "polarish",
   "private": true,
   "packageManager": "bun@1.2.22",
   "workspaces": [
@@ -11,16 +11,16 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
-    "cli": "node ./packages/hax-cli/bin/run.js",
-    "cli:build": "bun run --cwd packages/hax-cli build"
+    "cli": "node ./packages/polarish-cli/bin/run.js",
+    "cli:build": "bun run --cwd packages/polarish-cli build"
   },
   "dependencies": {
-    "@types/node": "^25.5.0",
-    "openai": "^6.32.0"
+    "@types/node": "^25.6.0",
+    "openai": "^6.34.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "turbo": "^2.8.20",
+    "turbo": "^2.9.6",
     "typescript": "~5.9.3"
   }
 }

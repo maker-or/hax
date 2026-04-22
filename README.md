@@ -1,6 +1,11 @@
 # Polarish
 
-If you are building anything with AI and you want your users to bring their existing AI subscriptions , instead of you maintaining the infernce cost , then you are in the right place , we have build polarish for exactly same purpouse , so that user can bring in their existing ai subs and you can foucs more on building your product instead of worring about the infernce cost
+If you're building AI apps and you're tired of handling inference costs or forcing users to pay for yet another AI subscription, this is for you.
+
+Polarsih lets your users bring their own AI subscriptions (Codex, Claude Code, etc.) into your app.
+
+You focus on building workflows.  
+Your users use the AI they already pay for.
 
 # How to use
 
@@ -16,19 +21,19 @@ After installation, users must run this command once:
 polarish
 ```
 
-This first run is compulsory and will guide them through installing and signing in to Codex and/or Claude Code.
+This first run is compulsory and will guide them through installing and signing in to Codex and Claude Code.
 
 ```bash
 polarish origins add https://app.example.com
 ```
 
-that's it , Now as a devloper use the polarish [ai package](./packages/ai/README.md) 
+that's it , Now as a devloper use the polarish [ai package](./packages/ai/README.md) to build your ai app
 
-# important
+# Important
 
 the polarish wrap round the codex and clauade-code so that it is really imporatnt that your users have codex and claude-code installed and signed into it
 
 - codex setup follw this [link](https://developers.openai.com/codex/cli)
 - claude-code setup follow this [link](https://claude.com/product/claude-code)
 
-polarish is heavily inspired from t3code and pimono ❤️‍🔥  
+polarish is heavily inspired from [t3code](https://github.com/pingdotgg/t3code) and [pi-mono](https://github.com/badlogic/pi-mono/) ❤️‍🔥  

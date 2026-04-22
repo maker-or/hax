@@ -25,7 +25,7 @@ const executeCodexMock = mock(
 	}),
 );
 
-mock.module("../../../packages/hax-cli/src/bridge/codex.ts", () => ({
+mock.module("../../../packages/polarish-cli/src/bridge/codex.ts", () => ({
 	checkCodexAvailability: async () => ({
 		authenticated: true,
 		installed: true,
@@ -36,7 +36,7 @@ mock.module("../../../packages/hax-cli/src/bridge/codex.ts", () => ({
 }));
 
 const { handleBridgeRequest } = await import(
-	"../../../packages/hax-cli/src/bridge/server.ts"
+	"../../../packages/polarish-cli/src/bridge/server.ts"
 );
 
 const request: AppRequestShapeType = {
