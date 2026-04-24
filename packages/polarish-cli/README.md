@@ -28,6 +28,9 @@ polarish origins remove https://app.example.com
 ```bash
 bun add -g @polarish/cli
 ```
+```bash
+bun add @polarish/ai
+```
 
 ## Important first step
 

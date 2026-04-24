@@ -57,6 +57,9 @@ If you are new, read in order.
 ```bash
 bun add @polarish/ai
 ```
+```bash
+bun add -g @polarish/cli
+```
 
 ---
 
